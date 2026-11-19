@@ -1,430 +1,1074 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "../../context/AppContext";
-import { Smartphone, Zap, Volume2, Sun, Wifi, Bluetooth, MapPin, Camera, Music, PhoneCall, MessageSquare, Calculator, Globe, Cloud, Plane, DollarSign, ShieldAlert, Check, X, ArrowRight } from "lucide-react";
-import { simulatePhoneAction } from "../../services/api";
+import {
+  Smartphone,
+  Globe,
+  Cloud,
+  MessageSquare,
+  Mail,
+  PhoneCall,
+  Calendar,
+  ShieldAlert,
+  Fingerprint,
+  BellRing,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  Calculator,
+  Sparkles,
+  Wifi,
+  CheckCircle2,
+  X,
+  ExternalLink,
+  Beaker,
+  Trash2,
+  MapPin
+} from "lucide-react";
+import { generateDailyBriefing, dispatchBriefingToPhone, simulatePhoneAction } from "../../services/api";
+import { checkBiometricSupport, enrollDeviceBiometric } from "../../lib/biometrics";
+import { PWAInstallButton } from "../common/PWAInstallButton";
+import { PhonePushChannelType } from "../../types";
 
 export const PhoneActionsModal: React.FC = () => {
-  const { isPhoneActionsModalOpen, setIsPhoneActionsModalOpen, setActiveCommandConfirmation, addActivityLog, addNotification } = useApp();
+  const {
+    isPhoneActionsModalOpen,
+    setIsPhoneActionsModalOpen,
+    setActiveCommandConfirmation,
+    addActivityLog,
+    addNotification,
+    addTask,
+    sendMessage,
+    setActiveWorkspaceView,
+    tasks,
+    notes,
+    userProfile,
+    isOfflineMode,
+    developerMode,
+    setIsErrorTesterModalOpen,
+    phoneBridgeConfig,
+    updatePhoneBridgeConfig
+  } = useApp();
 
-  const [activeTab, setActiveTab] = useState<"device" | "online" | "confirm">("device");
-  const [flashlightState, setFlashlightState] = useState(false);
-  const [volumeLevel, setVolumeLevel] = useState(80);
-  const [brightnessLevel, setBrightnessLevel] = useState(65);
-  const [wifiState, setWifiState] = useState(true);
-  const [bluetoothState, setBluetoothState] = useState(false);
+  const [activeTab, setActiveTab] = useState<"daily" | "safeguards" | "connect">("daily");
+  const [showMoreActions, setShowMoreActions] = useState(false);
+
+  // Interactive Drafts (Consolidated single SMS & Email actions)
+  const [smsPhone, setSmsPhone] = useState("+1 555-0192");
+  const [smsBody, setSmsBody] = useState("Running 10 minutes behind—see you shortly.");
+  const [emailTo, setEmailTo] = useState("team@example.com");
+  const [emailSubject, setEmailSubject] = useState("Daily Status Update");
+  const [emailBody, setEmailBody] = useState("Sharing today's top priorities and schedule summary.");
+  const [dialTarget, setDialTarget] = useState("+1 555-0192");
+  const [calendarTitle, setCalendarTitle] = useState("Project Review Sync");
+  const [calendarTime, setCalendarTime] = useState("Tomorrow · 10:00 AM");
+  const [weatherLocation, setWeatherLocation] = useState(phoneBridgeConfig.city || "Dhaka");
+  const [webSearchQuery, setWebSearchQuery] = useState("Today's top technology headlines");
+
+  // Secondary "More Actions" state
   const [calcInput, setCalcInput] = useState("450 * 1.15");
   const [calcResult, setCalcResult] = useState("517.50");
   const [unitValue, setUnitValue] = useState("10");
+  const [unitType, setUnitType] = useState<"km_mi" | "c_f" | "kg_lb">("km_mi");
   const [unitResult, setUnitResult] = useState("10 km = 6.21 miles");
+
+  // Cloud Briefing & Phone Push state
+  const [briefingText, setBriefingText] = useState("");
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [dispatchLoading, setDispatchLoading] = useState(false);
+  const [dispatchStatus, setDispatchStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [notifPermission, setNotifPermission] = useState<string>(
+    typeof Notification !== "undefined" ? Notification.permission : "unsupported"
+  );
+
+  // Biometric support state
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [enrollingBiometric, setEnrollingBiometric] = useState(false);
+
+  useEffect(() => {
+    checkBiometricSupport().then(status => {
+      setBiometricAvailable(status.platformAuthenticatorAvailable);
+    });
+    if (typeof Notification !== "undefined") {
+      setNotifPermission(Notification.permission);
+    }
+  }, [isPhoneActionsModalOpen]);
 
   if (!isPhoneActionsModalOpen) return null;
 
-  const handleSimulateAction = async (type: string, target: string, level: number, details: string) => {
-    if (level >= 2) {
-      setActiveCommandConfirmation({
-        action: { type, target, app: target, details },
-        level,
-        onConfirm: () => {
-          addNotification({ title: "Action Executed", message: `${details} completed.`, category: "system" });
-        },
-        onCancel: () => {}
+  const triggerConfirmation = (params: {
+    type: string;
+    target: string;
+    app: string;
+    level: number;
+    details: string;
+    intentUri?: string;
+    onDone?: () => void;
+  }) => {
+    setActiveCommandConfirmation({
+      action: {
+        type: params.type,
+        target: params.target,
+        app: params.app,
+        details: params.details,
+        intentUri: params.intentUri
+      },
+      level: params.level,
+      onConfirm: () => {
+        params.onDone?.();
+        addNotification({
+          title: "Action Completed",
+          message: params.details,
+          category: "system"
+        });
+      },
+      onCancel: () => {}
+    });
+    setIsPhoneActionsModalOpen(false);
+  };
+
+  const runDirectChatIntent = async (prompt: string, mode: "Ask" | "Act" | "Research") => {
+    setIsPhoneActionsModalOpen(false);
+    setActiveWorkspaceView("chat");
+    await sendMessage(prompt, mode, undefined, { webAccess: !isOfflineMode, newConversation: true });
+  };
+
+  const handleGenerateBriefing = async () => {
+    setBriefingLoading(true);
+    setDispatchStatus(null);
+    try {
+      const res = await generateDailyBriefing({
+        city: weatherLocation || phoneBridgeConfig.city,
+        tasks,
+        notes,
+        userProfile,
+        isOffline: isOfflineMode
       });
-      setIsPhoneActionsModalOpen(false);
-    } else {
-      const sim = await simulatePhoneAction(type, target, { details });
+      setBriefingText(res.briefing);
       addActivityLog({
-        command: details,
-        interpretation: `System Action: ${type}`,
-        actionPerformed: sim.executionLog,
-        serviceUsed: "Android OS Hardware Intent",
-        dataAccessed: target,
-        permissionUsed: "Level 1 Safe Action",
+        command: "Generate Daily Mobile Briefing",
+        interpretation: `Cloud briefing for ${weatherLocation}`,
+        actionPerformed: `Synthesized briefing via ${res.modelUsed}`,
+        serviceUsed: "DiptiK Cloud Brain",
+        dataAccessed: "Tasks · Notes · Live Weather",
+        permissionUsed: "Level 1 Safe Execution",
         result: "Success",
         confirmationLevel: 1
       });
+    } catch (err: any) {
+      setDispatchStatus({ ok: false, msg: err?.message || "Unable to generate briefing." });
+    } finally {
+      setBriefingLoading(false);
+    }
+  };
+
+  const handleSendBriefingToPhone = async () => {
+    const content =
+      briefingText.trim() ||
+      `Daily Update for ${userProfile.nickname || userProfile.name}\nActive Tasks: ${tasks.filter(t => t.status !== "Completed").length}\nLocation: ${phoneBridgeConfig.city}`;
+
+    setDispatchLoading(true);
+    setDispatchStatus(null);
+    try {
+      if (phoneBridgeConfig.channelType === "web_push") {
+        if (typeof Notification === "undefined") {
+          throw new Error("Browser notifications are unavailable in this environment. Select Telegram, Discord, or Custom Webhook.");
+        }
+        let perm = Notification.permission;
+        if (perm === "default") {
+          perm = await Notification.requestPermission();
+          setNotifPermission(perm);
+        }
+        if (perm !== "granted") {
+          throw new Error("Notification permission was not granted. Enable notifications or switch to a webhook channel.");
+        }
+        new Notification("DiptiK AI 3 · Daily Briefing", {
+          body: content.replace(/[#*`]/g, "").slice(0, 220),
+          icon: "/pwa-192x192.png"
+        });
+      }
+
+      const res = await dispatchBriefingToPhone({
+        channelType: phoneBridgeConfig.channelType,
+        webhookUrl: phoneBridgeConfig.webhookUrl,
+        telegramBotToken: phoneBridgeConfig.telegramBotToken,
+        telegramChatId: phoneBridgeConfig.telegramChatId,
+        title: "DiptiK AI 3 · Daily Briefing",
+        message: content
+      });
+
+      updatePhoneBridgeConfig({ lastBriefingSentAt: new Date().toLocaleTimeString() });
+      setDispatchStatus({
+        ok: true,
+        msg: `Delivered to ${res.channel} at ${new Date(res.timestamp).toLocaleTimeString()}.`
+      });
       addNotification({
-        title: "Level 1 Safe Action Executed",
-        message: sim.executionLog,
+        title: "Briefing Dispatched",
+        message: `Sent daily briefing via ${res.channel}.`,
         category: "system"
+      });
+    } catch (err: any) {
+      setDispatchStatus({ ok: false, msg: err?.message || "Dispatch failed." });
+    } finally {
+      setDispatchLoading(false);
+    }
+  };
+
+  const handleEnableBrowserNotifications = async () => {
+    if (typeof Notification === "undefined") {
+      setDispatchStatus({ ok: false, msg: "Web Notifications are not supported in this browser." });
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    setNotifPermission(perm);
+    if (perm === "granted") {
+      new Notification("DiptiK AI 3 Connected", {
+        body: "Daily briefings and Level 2/3 action alerts are active on this device.",
+        icon: "/pwa-192x192.png"
+      });
+      setDispatchStatus({ ok: true, msg: "Browser notifications enabled." });
+    } else {
+      setDispatchStatus({ ok: false, msg: "Permission denied. You can still connect Telegram, Discord, or a Webhook." });
+    }
+  };
+
+  const handleEnrollBiometric = async () => {
+    setEnrollingBiometric(true);
+    const res = await enrollDeviceBiometric(userProfile.email || userProfile.name);
+    setEnrollingBiometric(false);
+    if (res.success && res.credentialId) {
+      updatePhoneBridgeConfig({ biometricCredentialId: res.credentialId });
+      addNotification({
+        title: "Device Biometrics Enrolled",
+        message: "Passkey / Face ID / Touch ID is now linked for Level 3 safeguards.",
+        category: "security"
+      });
+    } else {
+      addNotification({
+        title: "Biometric Setup Notice",
+        message: res.error || "Hold-to-Confirm safeguard will be used when hardware passkeys are unavailable.",
+        category: "security"
       });
     }
   };
 
-  const handleToggleFlashlight = () => {
-    const next = !flashlightState;
-    setFlashlightState(next);
-    handleSimulateAction("flashlight", "Camera LED", 1, `Turn Flashlight ${next ? "ON" : "OFF"}`);
-  };
-
-  const handleToggleWifi = () => {
-    const next = !wifiState;
-    setWifiState(next);
-    handleSimulateAction("wifi_toggle", "System Wi-Fi", 1, `Turn Wi-Fi ${next ? "ON" : "OFF"}`);
+  const handleUnitConvert = () => {
+    const val = Number(unitValue) || 0;
+    if (unitType === "km_mi") setUnitResult(`${val} km = ${(val * 0.621371).toFixed(2)} miles`);
+    else if (unitType === "c_f") setUnitResult(`${val} °C = ${((val * 9) / 5 + 32).toFixed(1)} °F`);
+    else setUnitResult(`${val} kg = ${(val * 2.20462).toFixed(2)} lb`);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="w-full max-w-3xl bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100 flex flex-col max-h-[90vh]">
-        
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="w-full max-w-3xl bg-[#121520] rounded-2xl shadow-2xl overflow-hidden border border-white/[0.1] flex flex-col max-h-[90vh] text-[#e2e8f0]">
         {/* Header */}
-        <div className="bg-gradient-to-r from-red-900 to-rose-900 text-white p-5 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-xl bg-white/10 text-white">
+        <div className="bg-gradient-to-r from-[#FF1E8A]/12 via-[#8A2BE2]/12 to-[#0072FF]/15 border-b border-white/[0.08] px-6 py-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 rounded-xl bg-[#0072FF]/20 border border-[#0072FF]/35 text-[#00E5FF] shrink-0">
               <Smartphone className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="font-bold text-base leading-tight">Supported Phone Actions (Section 12)</h2>
-              <p className="text-[11px] text-red-200">Test offline device controls, online APIs & Level 1-3 confirmation safeguards</p>
+            <div className="min-w-0 text-left">
+              <h2 className="font-display font-semibold text-base text-white truncate">
+                Phone Actions & Mobile Bridge
+              </h2>
+              <p className="text-xs text-[#94a3b8] truncate">
+                Daily briefings · Confirmed messages & calls · Biometric Level 3 safeguards
+              </p>
             </div>
           </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {developerMode && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPhoneActionsModalOpen(false);
+                  setIsErrorTesterModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.1] text-[11px] font-medium text-[#cbd5e1] flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <Beaker className="w-3.5 h-3.5 text-[#00E5FF]" />
+                <span>Error Lab</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsPhoneActionsModalOpen(false)}
+              aria-label="Close Phone Actions"
+              className="p-1.5 rounded-lg hover:bg-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Focused 3-Tab Navigation */}
+        <div className="flex border-b border-white/[0.08] bg-[#0f121d] px-6 pt-2 overflow-x-auto gap-1">
           <button
-            onClick={() => setIsPhoneActionsModalOpen(false)}
-            className="p-1.5 rounded-full hover:bg-white/20 text-white transition-colors"
+            type="button"
+            onClick={() => setActiveTab("daily")}
+            className={`py-2.5 px-4 font-semibold text-xs border-b-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === "daily"
+                ? "border-[#00E5FF] text-white bg-[#121520] rounded-t-xl"
+                : "border-transparent text-[#94a3b8] hover:text-white"
+            }`}
           >
-            <X className="w-5 h-5" />
+            Daily Actions (8)
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("safeguards")}
+            className={`py-2.5 px-4 font-semibold text-xs border-b-2 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === "safeguards"
+                ? "border-[#FF1E8A] text-white bg-[#121520] rounded-t-xl"
+                : "border-transparent text-[#94a3b8] hover:text-white"
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-[#FF1E8A]" />
+            <span>Level 3 Safeguards</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("connect")}
+            className={`py-2.5 px-4 font-semibold text-xs border-b-2 transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === "connect"
+                ? "border-[#0072FF] text-white bg-[#121520] rounded-t-xl"
+                : "border-transparent text-[#94a3b8] hover:text-white"
+            }`}
+          >
+            <BellRing className="w-3.5 h-3.5 text-[#00E5FF]" />
+            <span>Phone Connection</span>
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-100 bg-gray-50 px-6 pt-2">
-          <button
-            onClick={() => setActiveTab("device")}
-            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all ${
-              activeTab === "device"
-                ? "border-[#E31B23] text-[#E31B23] bg-white rounded-t-xl shadow-sm"
-                : "border-transparent text-gray-500 hover:text-gray-800"
-            }`}
-          >
-            Offline / Device Actions (23)
-          </button>
-          <button
-            onClick={() => setActiveTab("online")}
-            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all ${
-              activeTab === "online"
-                ? "border-[#E31B23] text-[#E31B23] bg-white rounded-t-xl shadow-sm"
-                : "border-transparent text-gray-500 hover:text-gray-800"
-            }`}
-          >
-            Online Cloud Actions (18)
-          </button>
-          <button
-            onClick={() => setActiveTab("confirm")}
-            className={`py-2.5 px-5 font-bold text-xs border-b-2 transition-all flex items-center space-x-1 ${
-              activeTab === "confirm"
-                ? "border-[#E31B23] text-[#E31B23] bg-white rounded-t-xl shadow-sm"
-                : "border-transparent text-gray-500 hover:text-gray-800"
-            }`}
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Safeguarded Actions</span>
-          </button>
-        </div>
-
-        {/* Tab 1: Device Actions (Section 12.1) */}
-        {activeTab === "device" && (
-          <div className="p-6 overflow-y-auto flex-1 space-y-5 max-h-[70vh] text-left">
-            <div>
-              <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider">Hardware & System Settings</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-                <button
-                  onClick={handleToggleFlashlight}
-                  className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center ${
-                    flashlightState ? "bg-amber-100 border-amber-400 text-amber-900 font-bold" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <Zap className={`w-5 h-5 mb-1 ${flashlightState ? "text-amber-600 fill-amber-500" : "text-gray-400"}`} />
-                  <span className="text-xs">Flashlight</span>
-                  <span className="text-[10px] text-gray-400 font-mono">{flashlightState ? "ON" : "OFF"}</span>
-                </button>
-
-                <button
-                  onClick={handleToggleWifi}
-                  className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center ${
-                    wifiState ? "bg-blue-50 border-blue-400 text-blue-900 font-bold" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <Wifi className={`w-5 h-5 mb-1 ${wifiState ? "text-blue-600" : "text-gray-400"}`} />
-                  <span className="text-xs">Wi-Fi</span>
-                  <span className="text-[10px] text-gray-400 font-mono">{wifiState ? "Connected" : "Disabled"}</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    const next = !bluetoothState;
-                    setBluetoothState(next);
-                    handleSimulateAction("bluetooth", "Bluetooth Adapter", 1, `Turn Bluetooth ${next ? "ON" : "OFF"}`);
-                  }}
-                  className={`p-3 rounded-2xl border text-center transition-all flex flex-col items-center justify-center ${
-                    bluetoothState ? "bg-indigo-50 border-indigo-400 text-indigo-900 font-bold" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                  }`}
-                >
-                  <Bluetooth className={`w-5 h-5 mb-1 ${bluetoothState ? "text-indigo-600" : "text-gray-400"}`} />
-                  <span className="text-xs">Bluetooth</span>
-                  <span className="text-[10px] text-gray-400 font-mono">{bluetoothState ? "Pairing" : "OFF"}</span>
-                </button>
-
-                <button
-                  onClick={() => handleSimulateAction("camera_photo", "System Camera", 2, "Take a photo with camera after user confirmation")}
-                  className="p-3 rounded-2xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-center flex flex-col items-center justify-center"
-                >
-                  <Camera className="w-5 h-5 mb-1 text-[#E31B23]" />
-                  <span className="text-xs font-bold">Take Photo</span>
-                  <span className="text-[10px] text-amber-600 font-semibold">Level 2 Confirm</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Sliders for Volume and Brightness */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-3.5 bg-gray-50 border border-gray-200 rounded-2xl space-y-2">
-                <div className="flex justify-between items-center text-xs font-bold text-gray-800">
-                  <span className="flex items-center space-x-1.5">
-                    <Volume2 className="w-4 h-4 text-[#E31B23]" />
-                    <span>Media Volume</span>
-                  </span>
-                  <span>{volumeLevel}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volumeLevel}
-                  onChange={e => setVolumeLevel(Number(e.target.value))}
-                  className="w-full accent-[#E31B23]"
-                />
+        {/* TAB 1: FOCUSED DAILY ACTIONS */}
+        {activeTab === "daily" && (
+          <div className="p-6 overflow-y-auto flex-1 space-y-6 text-left gemini-scroll">
+            {/* Group A: Daily Updates & Briefings (Level 1 Cloud) */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-[#cbd5e1]">Daily Updates & Briefings</h3>
+                <span className="text-[11px] text-emerald-400">Level 1 · Cloud Automatic</span>
               </div>
 
-              <div className="p-3.5 bg-gray-50 border border-gray-200 rounded-2xl space-y-2">
-                <div className="flex justify-between items-center text-xs font-bold text-gray-800">
-                  <span className="flex items-center space-x-1.5">
-                    <Sun className="w-4 h-4 text-amber-500" />
-                    <span>Screen Brightness</span>
-                  </span>
-                  <span>{brightnessLevel}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={brightnessLevel}
-                  onChange={e => setBrightnessLevel(Number(e.target.value))}
-                  className="w-full accent-amber-500"
-                />
-              </div>
-            </div>
-
-            {/* Device Calculator & Convert Units */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-3.5 bg-white border border-gray-200 rounded-2xl space-y-2">
-                <span className="text-xs font-bold text-gray-900 flex items-center space-x-1">
-                  <Calculator className="w-3.5 h-3.5 text-gray-500" />
-                  <span>On-Device Calculator</span>
-                </span>
-                <div className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={calcInput}
-                    onChange={e => setCalcInput(e.target.value)}
-                    className="flex-1 px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono"
-                  />
-                  <button
-                    onClick={() => {
-                      try {
-                        const sanitized = calcInput.replace(/[^-()\d/*+.]/g, "");
-                        const val = new Function(`return ${sanitized}`)();
-                        setCalcResult(String(val));
-                      } catch (e) {
-                        setCalcResult("Error");
-                      }
-                    }}
-                    className="px-3 py-1 bg-[#E31B23] text-white rounded-xl text-xs font-bold font-mono"
-                  >
-                    =
-                  </button>
-                </div>
-                <div className="text-right font-mono text-sm font-bold text-gray-900 bg-gray-50 px-3 py-1.5 rounded-xl">
-                  {calcResult}
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-white border border-gray-200 rounded-2xl space-y-2">
-                <span className="text-xs font-bold text-gray-900 flex items-center space-x-1">
-                  <Globe className="w-3.5 h-3.5 text-gray-500" />
-                  <span>Offline Unit Converter</span>
-                </span>
-                <div className="flex space-x-2">
-                  <input
-                    type="number"
-                    value={unitValue}
-                    onChange={e => setUnitValue(e.target.value)}
-                    className="w-20 px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono"
-                  />
-                  <select className="flex-1 px-2 py-1 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium">
-                    <option>Km to Miles</option>
-                    <option>Celsius to Fahrenheit</option>
-                    <option>Kg to Pounds</option>
-                  </select>
-                  <button
-                    onClick={() => {
-                      const val = Number(unitValue);
-                      setUnitResult(`${val} km = ${(val * 0.621371).toFixed(2)} miles`);
-                    }}
-                    className="px-3 py-1 bg-gray-800 text-white rounded-xl text-xs font-bold"
-                  >
-                    Convert
-                  </button>
-                </div>
-                <div className="text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-xl">
-                  {unitResult}
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Action Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { label: "Set Alarm (7:00 AM)", target: "System Clock", level: 1, desc: "Schedules system alarm timer automatically" },
-                { label: "Start 15m Timer", target: "System Clock", level: 1, desc: "Launches countdown timer in background clock" },
-                { label: "Play Local Music", target: "Music Player", level: 1, desc: "Resumes local audio playback from storage" },
-                { label: "Prepare Phone Call", target: "Dialer", level: 2, desc: "Opens native dialer with contact pre-filled" },
-                { label: "Prepare SMS Draft", target: "Messages", level: 2, desc: "Creates draft message for user review" },
-                { label: "Start Audio Recording", target: "Voice Recorder", level: 2, desc: "Initializes hardware microphone recording" }
-              ].map((act, i) => (
-                <div key={i} className="p-3.5 rounded-2xl border border-gray-200 bg-white hover:border-gray-300 flex flex-col justify-between space-y-2.5 shadow-xs">
-                  <div>
-                    {/* 1. Header in one line */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-gray-900 block truncate">{act.label}</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {/* 1. Daily Morning Briefing */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 text-white font-semibold text-xs">
+                      <Sparkles className="w-4 h-4 text-[#00E5FF] shrink-0" />
+                      <span>Daily Briefing & Schedule Digest</span>
                     </div>
-
-                    {/* 2. Level left side */}
-                    <div className="mt-2 flex items-center">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        act.level === 2 ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                      }`}>
-                        Level {act.level} • {act.level === 2 ? "User Confirmation" : "Safe Execution"}
-                      </span>
-                    </div>
-
-                    {/* 3. Description */}
-                    <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{act.desc}</p>
+                    <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                      Synthesizes today&apos;s {tasks.filter(t => t.status !== "Completed").length} pending tasks, notes, and weather for push or chat delivery.
+                    </p>
                   </div>
-
-                  {/* 4. Below keep button */}
-                  <button
-                    onClick={() => handleSimulateAction(act.label, act.target, act.level, act.label)}
-                    className="w-full py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center"
-                  >
-                    Run Action (Level {act.level})
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tab 2: Online Cloud Actions (Section 12.2) */}
-        {activeTab === "online" && (
-          <div className="p-6 overflow-y-auto flex-1 space-y-4 max-h-[70vh] text-left">
-            <span className="text-xs font-bold text-gray-700 uppercase tracking-wider">Cloud Connected Capabilities</span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { title: "Search the Web", desc: "Retrieve real-time search engine results & citations", icon: Globe, level: 1 },
-                { title: "Check Weather & Directions", desc: "Get live weather maps and GPS navigation routes", icon: Cloud, level: 1 },
-                { title: "Read Connected Email", desc: "Summarize unread inbox threads from Google Gmail", icon: MessageSquare, level: 1 },
-                { title: "Track Flights & Currency", desc: "Live flight delays, gate updates & exchange rates", icon: Plane, level: 1 },
-                { title: "Send Prepared Email", desc: "Send draft message through Gmail API integration", icon: MessageSquare, level: 2 },
-                { title: "Create Calendar Events", desc: "Add scheduled meetings with automated reminders", icon: Cloud, level: 2 }
-              ].map((act, idx) => {
-                const Icon = act.icon;
-                return (
-                  <div key={idx} className="p-4 rounded-2xl border border-gray-200 bg-white flex flex-col justify-between space-y-3 shadow-xs hover:border-red-300 transition-all">
-                    <div>
-                      {/* 1. Header in one line */}
-                      <div className="flex items-center space-x-2">
-                        <Icon className="w-4 h-4 text-[#E31B23] shrink-0" />
-                        <span className="text-xs font-extrabold text-gray-900 block truncate">{act.title}</span>
-                      </div>
-
-                      {/* 2. Level left side */}
-                      <div className="mt-2 flex items-center">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          act.level === 2 ? "bg-amber-100 text-amber-800 border border-amber-200" : "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                        }`}>
-                          Level {act.level} • {act.level === 2 ? "Confirmation Safeguard" : "Safe Automatic Execution"}
-                        </span>
-                      </div>
-
-                      {/* 3. Description */}
-                      <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{act.desc}</p>
-                    </div>
-
-                    {/* 4. Below keep button */}
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleSimulateAction(act.title, "Cloud Service", act.level, `Execute online action: ${act.title}`)}
-                      className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center ${
-                        act.level === 2 ? "bg-amber-500 hover:bg-amber-600 text-white" : "bg-[#FFF0F1] hover:bg-[#E31B23] text-[#E31B23] hover:text-white"
-                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab("connect");
+                        handleGenerateBriefing();
+                      }}
+                      className="flex-1 py-2 px-3 btn-diptik-primary rounded-xl text-xs font-medium cursor-pointer whitespace-nowrap"
                     >
-                      Test Action (Level {act.level})
+                      Generate Briefing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        runDirectChatIntent(
+                          `Give me my daily briefing for ${weatherLocation}, summarizing pending tasks and top priorities today.`,
+                          "Ask"
+                        )
+                      }
+                      className="py-2 px-3 bg-[#121520] hover:bg-white/[0.06] border border-white/[0.1] rounded-xl text-xs text-[#cbd5e1] cursor-pointer whitespace-nowrap"
+                    >
+                      In Chat
                     </button>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+                </div>
 
-        {/* Tab 3: Actions Requiring Confirmation (Section 12.3 & 26) */}
-        {activeTab === "confirm" && (
-          <div className="p-6 overflow-y-auto flex-1 space-y-4 max-h-[70vh] text-left">
-            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 leading-relaxed">
-              <strong>Level 2 & Level 3 Safeguards</strong>: Per Section 26, any action that sends communications, deletes files, modifies account credentials, or makes financial purchases requires explicit user confirmation before executing.
-            </div>
-
-            <div className="space-y-2.5">
-              {[
-                { title: "Sending SMS / Messages", target: "Rahim (+1 555-0192)", level: 2, desc: "Requires reviewing draft text before outbound transmission." },
-                { title: "Sending Emails", target: "Executive Team", level: 2, desc: "Requires confirming subject and recipients in Gmail." },
-                { title: "Making Outbound Voice Calls", target: "Rahim", level: 2, desc: "Prevents accidental pocket dials or background calling." },
-                { title: "Deleting Saved Files or Calendar Events", target: "Local Knowledge / Calendar", level: 3, desc: "Requires Touch Biometric or PIN code (1234) verification." },
-                { title: "Sharing Precise Location or Publishing Content", target: "Social API / GPS", level: 3, desc: "Strong privacy protection against background tracking." }
-              ].map((item, idx) => (
-                <div key={idx} className="p-4 rounded-2xl border border-gray-200 bg-white flex flex-col justify-between space-y-3 shadow-xs hover:border-gray-300 transition-all">
-                  <div>
-                    {/* 1. Header in one line */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-gray-900 block truncate">{item.title}</span>
+                {/* 2. Web Search & Live Grounding */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-white font-semibold text-xs">
+                      <Globe className="w-4 h-4 text-[#00E5FF] shrink-0" />
+                      <span>Live Web Search</span>
                     </div>
-
-                    {/* 2. Level left side */}
-                    <div className="mt-2 flex items-center">
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                        item.level === 3 ? "bg-red-100 text-red-800 border border-red-200" : "bg-amber-100 text-amber-800 border border-amber-200"
-                      }`}>
-                        Level {item.level} • {item.level === 3 ? "PIN / Biometric Safeguard" : "User Confirmation Required"}
-                      </span>
-                    </div>
-
-                    {/* 3. Description */}
-                    <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{item.desc}</p>
+                    <input
+                      type="text"
+                      value={webSearchQuery}
+                      onChange={e => setWebSearchQuery(e.target.value)}
+                      placeholder="Search live web updates..."
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none focus:border-[#0072FF]"
+                    />
                   </div>
-
-                  {/* 4. Below keep button */}
                   <button
-                    onClick={() => handleSimulateAction(item.title, item.target, item.level, `Test Level ${item.level} Safeguard: ${item.title}`)}
-                    className={`w-full py-2 px-3 rounded-xl text-xs font-bold text-white shadow-xs transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                      item.level === 3 ? "bg-red-600 hover:bg-red-700" : "bg-amber-600 hover:bg-amber-700"
-                    }`}
+                    type="button"
+                    onClick={() => runDirectChatIntent(webSearchQuery.trim() || "Latest world news today", "Research")}
+                    className="w-full py-2 px-3 bg-[#0072FF] hover:bg-[#005ce6] text-white rounded-xl text-xs font-medium cursor-pointer whitespace-nowrap"
                   >
-                    <span>Simulate Safeguard (Level {item.level})</span>
+                    Search with Citations
                   </button>
                 </div>
-              ))}
+
+                {/* 3. Weather & Directions */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-white font-semibold text-xs">
+                      <Cloud className="w-4 h-4 text-[#00E5FF] shrink-0" />
+                      <span>Weather & Directions</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={weatherLocation}
+                      onChange={e => {
+                        setWeatherLocation(e.target.value);
+                        updatePhoneBridgeConfig({ city: e.target.value });
+                      }}
+                      placeholder="City or destination..."
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none focus:border-[#0072FF]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        runDirectChatIntent(`What is today's weather and commute forecast in ${weatherLocation}?`, "Ask")
+                      }
+                      className="flex-1 py-2 px-3 bg-[#121520] hover:bg-white/[0.06] border border-white/[0.1] text-white rounded-xl text-xs font-medium cursor-pointer whitespace-nowrap"
+                    >
+                      Check Forecast
+                    </button>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(weatherLocation || "Dhaka")}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="py-2 px-3 bg-[#0072FF] hover:bg-[#005ce6] text-white rounded-xl text-xs font-medium flex items-center gap-1 whitespace-nowrap"
+                    >
+                      <span>Maps</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+
+                {/* 4. Unread Email & Calendar Summary */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 text-white font-semibold text-xs">
+                      <Mail className="w-4 h-4 text-[#FF1E8A] shrink-0" />
+                      <span>Unread Email & Reminders</span>
+                    </div>
+                    <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                      Summarize priority messages and review upcoming deadlines in one view.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      runDirectChatIntent(
+                        "Review my upcoming tasks and help me triage priority follow-ups and reminders for today.",
+                        "Act"
+                      )
+                    }
+                    className="w-full py-2 px-3 bg-[#121520] hover:bg-white/[0.06] border border-white/[0.1] text-white rounded-xl text-xs font-medium cursor-pointer whitespace-nowrap"
+                  >
+                    Triage Updates
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Group B: Consolidated Draft & Confirm Actions (Level 2) */}
+            <section className="space-y-3 pt-2 border-t border-white/[0.08]">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-[#cbd5e1]">Draft & Schedule with Confirmation</h3>
+                <span className="text-[11px] text-amber-300">Level 2 · Tap-to-Confirm</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {/* 5. Consolidated SMS Action */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-white font-semibold text-xs">
+                        <MessageSquare className="w-4 h-4 text-amber-300 shrink-0" />
+                        <span>SMS / Message (Draft & Send)</span>
+                      </span>
+                      <span className="text-[11px] text-[#94a3b8]">Level 2</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={smsPhone}
+                      onChange={e => setSmsPhone(e.target.value)}
+                      placeholder="Recipient number"
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={smsBody}
+                      onChange={e => setSmsBody(e.target.value)}
+                      placeholder="Message draft..."
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      triggerConfirmation({
+                        type: "send_sms",
+                        target: smsPhone || "Messages",
+                        app: "Native Messages",
+                        level: 2,
+                        details: `Send SMS to ${smsPhone}: "${smsBody}"`,
+                        intentUri: `sms:${encodeURIComponent(smsPhone)}?body=${encodeURIComponent(smsBody)}`
+                      })
+                    }
+                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    Review & Open SMS
+                  </button>
+                </div>
+
+                {/* 6. Consolidated Email Action */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-white font-semibold text-xs">
+                        <Mail className="w-4 h-4 text-amber-300 shrink-0" />
+                        <span>Email (Draft & Send)</span>
+                      </span>
+                      <span className="text-[11px] text-[#94a3b8]">Level 2</span>
+                    </div>
+                    <input
+                      type="email"
+                      value={emailTo}
+                      onChange={e => setEmailTo(e.target.value)}
+                      placeholder="Recipient email"
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={emailSubject}
+                      onChange={e => setEmailSubject(e.target.value)}
+                      placeholder="Subject line..."
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      triggerConfirmation({
+                        type: "send_email",
+                        target: emailTo,
+                        app: "Mail Client",
+                        level: 2,
+                        details: `Prepare email "${emailSubject}" to ${emailTo}`,
+                        intentUri: `mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`
+                      })
+                    }
+                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    Review & Compose Email
+                  </button>
+                </div>
+
+                {/* 7. Voice Call Dialer */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-white font-semibold text-xs">
+                        <PhoneCall className="w-4 h-4 text-[#00E5FF] shrink-0" />
+                        <span>Voice Call (Dialer Intent)</span>
+                      </span>
+                      <span className="text-[11px] text-[#94a3b8]">Level 2</span>
+                    </div>
+                    <input
+                      type="tel"
+                      value={dialTarget}
+                      onChange={e => setDialTarget(e.target.value)}
+                      placeholder="Phone number..."
+                      className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none font-mono"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      triggerConfirmation({
+                        type: "make_call",
+                        target: dialTarget,
+                        app: "Phone Dialer",
+                        level: 2,
+                        details: `Open dialer to call ${dialTarget}`,
+                        intentUri: `tel:${dialTarget.replace(/\s+/g, "")}`
+                      })
+                    }
+                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    Confirm & Dial
+                  </button>
+                </div>
+
+                {/* 8. Calendar Event & Reminder */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-[#181c2b] flex flex-col justify-between gap-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-white font-semibold text-xs">
+                        <Calendar className="w-4 h-4 text-[#FF1E8A] shrink-0" />
+                        <span>Calendar Event & Reminder</span>
+                      </span>
+                      <span className="text-[11px] text-[#94a3b8]">Level 2</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={calendarTitle}
+                        onChange={e => setCalendarTitle(e.target.value)}
+                        placeholder="Event title"
+                        className="px-2.5 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={calendarTime}
+                        onChange={e => setCalendarTime(e.target.value)}
+                        placeholder="Time"
+                        className="px-2.5 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      triggerConfirmation({
+                        type: "calendar_event",
+                        target: "Scheduled Tasks",
+                        app: "Calendar & Reminders",
+                        level: 2,
+                        details: `Schedule "${calendarTitle}" (${calendarTime})`,
+                        onDone: () => {
+                          addTask({
+                            title: calendarTitle,
+                            dueDate: "Upcoming",
+                            time: calendarTime,
+                            priority: "High",
+                            status: "Today",
+                            reminderSet: true
+                          });
+                        }
+                      })
+                    }
+                    className="w-full py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap"
+                  >
+                    Confirm & Schedule
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Collapsible "More Actions & Voice Intents" Drawer */}
+            <section className="pt-2 border-t border-white/[0.08]">
+              <button
+                type="button"
+                onClick={() => setShowMoreActions(prev => !prev)}
+                className="w-full flex items-center justify-between py-2 px-3 rounded-xl bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.08] text-xs font-medium text-[#cbd5e1] cursor-pointer"
+              >
+                <span>More Actions · Quick Utilities & Voice Intents</span>
+                {showMoreActions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+
+              {showMoreActions && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="p-3.5 bg-[#181c2b] border border-white/[0.08] rounded-2xl space-y-2.5">
+                    <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <Calculator className="w-3.5 h-3.5 text-[#00E5FF]" />
+                      <span>Quick Calculator</span>
+                    </span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={calcInput}
+                        onChange={e => setCalcInput(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs font-mono text-white focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            const sanitized = calcInput.replace(/[^-()\d/*+.]/g, "");
+                            const val = new Function(`return ${sanitized}`)();
+                            setCalcResult(String(val));
+                          } catch {
+                            setCalcResult("Error");
+                          }
+                        }}
+                        className="px-3 py-1 btn-diptik-primary rounded-xl text-xs font-mono font-semibold cursor-pointer"
+                      >
+                        =
+                      </button>
+                    </div>
+                    <div className="text-right font-mono text-xs font-semibold text-[#00E5FF] bg-[#121520] px-3 py-1.5 rounded-xl tabular-nums">
+                      {calcResult}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-[#181c2b] border border-white/[0.08] rounded-2xl space-y-2.5">
+                    <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-[#FF1E8A]" />
+                      <span>Unit Converter</span>
+                    </span>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={unitValue}
+                        onChange={e => setUnitValue(e.target.value)}
+                        className="w-16 px-2 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs font-mono text-white"
+                      />
+                      <select
+                        value={unitType}
+                        onChange={e => setUnitType(e.target.value as any)}
+                        className="flex-1 px-2 py-1 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white"
+                      >
+                        <option value="km_mi">km to miles</option>
+                        <option value="c_f">°C to °F</option>
+                        <option value="kg_lb">kg to lb</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleUnitConvert}
+                        className="px-3 py-1 bg-[#0072FF] hover:bg-[#005ce6] text-white rounded-xl text-xs font-medium cursor-pointer"
+                      >
+                        Go
+                      </button>
+                    </div>
+                    <div className="text-xs font-mono text-emerald-300 bg-[#121520] px-3 py-1.5 rounded-xl tabular-nums">
+                      {unitResult}
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2 p-3.5 bg-[#181c2b] border border-white/[0.08] rounded-2xl flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-[#94a3b8]">Trigger secondary utilities by chat or voice:</span>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        "Set a 15-minute focus timer",
+                        "Track USD to BDT exchange rate"
+                      ].map(cmd => (
+                        <button
+                          key={cmd}
+                          type="button"
+                          onClick={() => runDirectChatIntent(cmd, "Act")}
+                          className="px-3 py-1.5 rounded-lg bg-[#121520] hover:bg-white/[0.06] border border-white/[0.1] text-xs text-[#00E5FF] cursor-pointer whitespace-nowrap"
+                        >
+                          {cmd}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* TAB 2: LEVEL 3 BIOMETRIC SAFEGUARDS */}
+        {activeTab === "safeguards" && (
+          <div className="p-6 overflow-y-auto flex-1 space-y-5 text-left gemini-scroll">
+            <div className="p-4 rounded-2xl bg-[#181c2b] border border-white/[0.08] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs font-semibold text-white">
+                  <Fingerprint className="w-4 h-4 text-[#00E5FF]" />
+                  <span>Device Biometric Authenticator</span>
+                </div>
+                <p className="text-[11px] text-[#94a3b8]">
+                  {phoneBridgeConfig.biometricCredentialId
+                    ? "Device Passkey / Face ID / Touch ID enrolled for Level 3 actions."
+                    : biometricAvailable
+                    ? "Hardware biometric authenticator detected. Enroll once to guard destructive actions."
+                    : "Hold-to-Confirm safeguard active (hardware passkey optional)."}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={enrollingBiometric}
+                onClick={handleEnrollBiometric}
+                className="px-3.5 py-2 rounded-xl btn-diptik-primary text-xs font-medium cursor-pointer whitespace-nowrap shrink-0"
+              >
+                {enrollingBiometric
+                  ? "Enrolling..."
+                  : phoneBridgeConfig.biometricCredentialId
+                  ? "Re-enroll Biometric"
+                  : "Enable Biometric Guard"}
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-4 rounded-2xl border border-[#FF1744]/25 bg-[#181c2b] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="w-4 h-4 text-[#FF8A9E]" />
+                    <span className="text-xs font-semibold text-white">
+                      Delete Saved Files, Notes, or Calendar Events
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                    Level 3 Safeguard · Prevents accidental permanent deletion without Face ID, Touch ID, or Hold-to-Confirm approval.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    triggerConfirmation({
+                      type: "delete_data",
+                      target: "Archived Notes & Completed Tasks",
+                      app: "Workspace Storage",
+                      level: 3,
+                      details: "Delete archived temporary drafts after biometric verification"
+                    })
+                  }
+                  className="px-4 py-2 rounded-xl bg-[#FF1744] hover:bg-[#d51038] text-white text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Verify & Clean Up
+                </button>
+              </div>
+
+              <div className="p-4 rounded-2xl border border-[#FF1744]/25 bg-[#181c2b] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-[#FF8A9E]" />
+                    <span className="text-xs font-semibold text-white">
+                      Share Precise Location or External Broadcast
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                    Level 3 Safeguard · Protects GPS coordinates and external webhook broadcasts from unauthorized triggers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    triggerConfirmation({
+                      type: "share_location",
+                      target: weatherLocation || "Current Location",
+                      app: "Location & Sharing",
+                      level: 3,
+                      details: `Share live check-in location (${weatherLocation}) with trusted contact`
+                    })
+                  }
+                  className="px-4 py-2 rounded-xl bg-[#FF1744] hover:bg-[#d51038] text-white text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Verify & Share
+                </button>
+              </div>
             </div>
           </div>
         )}
 
+        {/* TAB 3: THREE-PART WEB-TO-PHONE CONNECTION */}
+        {activeTab === "connect" && (
+          <div className="p-6 overflow-y-auto flex-1 space-y-5 text-left gemini-scroll">
+            {/* Part 1: Cloud Brain & Briefing Schedule */}
+            <div className="p-4 rounded-2xl bg-[#181c2b] border border-white/[0.08] space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-semibold text-white">1. Cloud Brain & Daily Briefing</h3>
+                  <p className="text-[11px] text-[#94a3b8] mt-0.5">
+                    Synthesizes live weather, tasks, and reminders using Gemini 4 Hydrogen.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={briefingLoading}
+                  onClick={handleGenerateBriefing}
+                  className="px-3.5 py-2 rounded-xl btn-diptik-primary text-xs font-medium cursor-pointer whitespace-nowrap"
+                >
+                  {briefingLoading ? "Synthesizing..." : "Generate Now"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-[#94a3b8] mb-1">Briefing City</label>
+                  <input
+                    type="text"
+                    value={phoneBridgeConfig.city}
+                    onChange={e => {
+                      updatePhoneBridgeConfig({ city: e.target.value });
+                      setWeatherLocation(e.target.value);
+                    }}
+                    className="w-full px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] text-[#94a3b8] mb-1">Daily Schedule Time</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="time"
+                      value={phoneBridgeConfig.dailyBriefingTime}
+                      onChange={e => updatePhoneBridgeConfig({ dailyBriefingTime: e.target.value })}
+                      className="flex-1 px-3 py-1.5 bg-[#121520] border border-white/[0.1] rounded-xl text-xs font-mono text-white focus:outline-none"
+                    />
+                    <label className="flex items-center gap-1.5 text-xs text-[#cbd5e1] cursor-pointer whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={phoneBridgeConfig.autoBriefingEnabled}
+                        onChange={e => updatePhoneBridgeConfig({ autoBriefingEnabled: e.target.checked })}
+                        className="accent-[#0072FF]"
+                      />
+                      <span>Auto</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {briefingText && (
+                <textarea
+                  rows={5}
+                  value={briefingText}
+                  onChange={e => setBriefingText(e.target.value)}
+                  className="w-full bg-[#121520] border border-white/[0.1] rounded-xl p-3 text-xs text-[#e2e8f0] leading-relaxed focus:outline-none"
+                />
+              )}
+            </div>
+
+            {/* Part 2: Push Notification & Webhook Channel */}
+            <div className="p-4 rounded-2xl bg-[#181c2b] border border-white/[0.08] space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-semibold text-white">2. Push & Phone Update Channel</h3>
+                  <p className="text-[11px] text-[#94a3b8] mt-0.5">
+                    Deliver briefings via Browser/PWA Push or forward to Telegram, Discord, or an HTTPS webhook.
+                  </p>
+                </div>
+                {phoneBridgeConfig.lastBriefingSentAt && (
+                  <span className="text-[11px] text-emerald-400 tabular-nums">
+                    Last sent · {phoneBridgeConfig.lastBriefingSentAt}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {(
+                  [
+                    { id: "web_push", label: "Web Push / PWA" },
+                    { id: "telegram", label: "Telegram Bot" },
+                    { id: "discord", label: "Discord" },
+                    { id: "custom_webhook", label: "Custom Webhook" }
+                  ] as { id: PhonePushChannelType; label: string }[]
+                ).map(ch => (
+                  <button
+                    key={ch.id}
+                    type="button"
+                    onClick={() => updatePhoneBridgeConfig({ channelType: ch.id })}
+                    className={`py-2 px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap ${
+                      phoneBridgeConfig.channelType === ch.id
+                        ? "bg-[#0072FF]/20 border-[#0072FF] text-white"
+                        : "bg-[#121520] border-white/[0.08] text-[#94a3b8] hover:text-white"
+                    }`}
+                  >
+                    {ch.label}
+                  </button>
+                ))}
+              </div>
+
+              {phoneBridgeConfig.channelType === "web_push" && (
+                <div className="p-3 rounded-xl bg-[#121520] border border-white/[0.06] flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs text-[#cbd5e1]">
+                    Notification permission: <strong className="text-white">{notifPermission}</strong>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleEnableBrowserNotifications}
+                      className="px-3 py-1.5 rounded-lg bg-[#0072FF] hover:bg-[#005ce6] text-white text-xs font-medium cursor-pointer whitespace-nowrap"
+                    >
+                      Enable Notifications
+                    </button>
+                    <PWAInstallButton compact />
+                  </div>
+                </div>
+              )}
+
+              {phoneBridgeConfig.channelType === "telegram" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <input
+                    type="password"
+                    value={phoneBridgeConfig.telegramBotToken}
+                    onChange={e => updatePhoneBridgeConfig({ telegramBotToken: e.target.value })}
+                    placeholder="Telegram Bot Token"
+                    className="px-3 py-2 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    value={phoneBridgeConfig.telegramChatId}
+                    onChange={e => updatePhoneBridgeConfig({ telegramChatId: e.target.value })}
+                    placeholder="Telegram Chat ID"
+                    className="px-3 py-2 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {(phoneBridgeConfig.channelType === "discord" ||
+                phoneBridgeConfig.channelType === "custom_webhook") && (
+                <input
+                  type="url"
+                  value={phoneBridgeConfig.webhookUrl}
+                  onChange={e => updatePhoneBridgeConfig({ webhookUrl: e.target.value })}
+                  placeholder="https://discord.com/api/webhooks/... or https://your-endpoint"
+                  className="w-full px-3 py-2 bg-[#121520] border border-white/[0.1] rounded-xl text-xs text-white focus:outline-none"
+                />
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="text-[11px] text-[#94a3b8]">
+                  {dispatchStatus ? (
+                    <span className={dispatchStatus.ok ? "text-emerald-400" : "text-[#FF8A9E]"}>
+                      {dispatchStatus.msg}
+                    </span>
+                  ) : (
+                    <span>Send the current briefing or test your phone channel connection.</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={dispatchLoading}
+                  onClick={handleSendBriefingToPhone}
+                  className="px-4 py-2 rounded-xl bg-[#0072FF] hover:bg-[#005ce6] disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{dispatchLoading ? "Sending..." : "Send Briefing to Phone"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Part 3: Mobile Client / Native Bridge Architecture */}
+            <div className="p-4 rounded-2xl bg-[#181c2b] border border-white/[0.08] space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Wifi className="w-3.5 h-3.5 text-[#00E5FF]" />
+                  <span>3. Mobile Client & Native Bridge</span>
+                </h3>
+                <PWAInstallButton compact />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] text-[#94a3b8]">
+                <div className="p-3 rounded-xl bg-[#121520] border border-white/[0.06] space-y-1">
+                  <p className="font-semibold text-emerald-300 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Active in PWA / Browser</span>
+                  </p>
+                  <p>
+                    tel:, sms:, mailto: intents, Google Maps links, Web Push notifications, and WebAuthn biometrics.
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-[#121520] border border-white/[0.06] space-y-1">
+                  <p className="font-semibold text-[#00E5FF]">Native Wrapper (Capacitor / Flutter)</p>
+                  <p>
+                    Connects via HTTPS/WebSockets for background audio capture, silent OS toggles, and native BiometricPrompt.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

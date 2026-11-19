@@ -229,35 +229,35 @@ export const OnboardingModal: React.FC = () => {
       title: "Ask anything",
       description: "Switch between Gemini 4 Hydrogen, ChatGPT-style, Claude-style, or On-Device Lite anytime.",
       icon: Sparkles,
-      color: "bg-[#FFF0F1] text-[#E31B23]",
-      preview: "User: Explain Quantum Computing in simple terms.\nDiptiK AI: Imagine a normal computer as a light switch (On or Off)..."
+      color: "bg-[#FF1E8A]/15 text-[#FF1E8A] border border-[#FF1E8A]/30",
+      preview: "User: Explain Quantum Computing in simple terms.\nDiptiK AI 3: Imagine a normal computer as a light switch (On or Off)..."
     },
     {
       title: "Real-Time Voice Control",
       description: "Talk naturally to your AI agent with Gemini 3.8 Live bidirectional audio & live transcripts.",
       icon: Mic,
-      color: "bg-emerald-50 text-emerald-600",
+      color: "bg-[#0072FF]/15 text-[#00E5FF] border border-[#0072FF]/35",
       preview: "Live Voice: 'Hey DiptiK, create a task to review Q3 metrics at 5 PM.'\nAgent: Done! I added that to your Today tasks."
     },
     {
       title: "Multi-Step AI Agents",
       description: "Launch specialized agents, build custom workflows, and execute plans step-by-step.",
       icon: Cpu,
-      color: "bg-blue-50 text-blue-600",
+      color: "bg-[#8A2BE2]/20 text-[#d8b4fe] border border-[#8A2BE2]/40",
       preview: "Plan: Gather context -> Draft summary -> Verify safeguards -> Deliver report."
     },
     {
       title: "Profiles & Default Modes",
       description: "Sign in with Google, create custom user profiles, or jump straight in with a default profile.",
       icon: WifiOff,
-      color: "bg-amber-50 text-amber-600",
+      color: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
       preview: "Profiles synced to Cloud Firestore + Instant Default Preset access."
     }
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-100 flex flex-col max-h-[92vh] relative">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-[#121520] rounded-2xl shadow-2xl overflow-hidden border border-white/[0.1] flex flex-col max-h-[92vh] relative text-[#e2e8f0]">
         {/* Close button if authenticated or on quick auth */}
         {(isAuthenticated || step !== "splash") && (
           <button
@@ -269,7 +269,7 @@ export const OnboardingModal: React.FC = () => {
               }
             }}
             title="Use Default & Close"
-            className="absolute top-3.5 right-3.5 z-20 p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors cursor-pointer"
+            className="absolute top-3.5 right-3.5 z-20 p-2 rounded-lg bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.08] text-[#94a3b8] hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -277,17 +277,17 @@ export const OnboardingModal: React.FC = () => {
 
         {/* Step 1: Splash */}
         {step === "splash" && (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-[#FFF0F1] to-white min-h-[460px]">
-            <div className="mb-6 animate-bounce">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-[#121520] to-[#0b0d14] min-h-[460px]">
+            <div className="mb-6">
               <DiptiKLogo size="xl" showText={false} />
             </div>
-            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">DiptiK AI</h1>
-            <p className="text-sm font-medium text-gray-600 mt-2 max-w-xs">
+            <h1 className="font-display text-3xl font-bold text-white tracking-tight">DiptiK AI 3</h1>
+            <p className="text-sm font-medium text-[#94a3b8] mt-2 max-w-xs">
               Ask. Speak. Automate. Get things done.
             </p>
             <div className="mt-12 flex flex-col items-center space-y-2">
-              <RefreshCw className="w-6 h-6 text-[#E31B23] animate-spin" />
-              <span className="text-xs text-gray-500 font-medium">Checking authentication & voice engine...</span>
+              <RefreshCw className="w-6 h-6 text-[#00E5FF] animate-spin" />
+              <span className="text-xs text-[#94a3b8] font-medium">Checking authentication & voice engine...</span>
             </div>
           </div>
         )}
@@ -299,15 +299,15 @@ export const OnboardingModal: React.FC = () => {
               <div className="mb-5">
                 <DiptiKLogo size="lg" showText={false} />
               </div>
-              <h2 className="text-2xl font-extrabold text-gray-900">Welcome to DiptiK AI</h2>
-              <p className="text-xs text-gray-600 mt-2 max-w-xs leading-relaxed">
+              <h2 className="font-display text-2xl font-bold text-white">Welcome to DiptiK AI 3</h2>
+              <p className="text-xs text-[#94a3b8] mt-2 max-w-xs leading-relaxed">
                 Sign in, create your own personalized AI profile, or start immediately with a default Gemini / ChatGPT / Offline preset.
               </p>
             </div>
             <div className="space-y-2.5 mt-8">
               <button
                 onClick={() => setStep("signin")}
-                className="w-full py-3.5 px-4 bg-[#E31B23] hover:bg-[#BF141B] text-white rounded-2xl font-bold text-sm shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer"
+                className="w-full py-3.5 px-4 btn-diptik-primary text-white rounded-2xl font-semibold text-sm shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <span>Sign In / Create Profile</span>
                 <ArrowRight className="w-4 h-4" />
@@ -317,13 +317,13 @@ export const OnboardingModal: React.FC = () => {
                   useDefaultProfilePreset("Gemini 4 Hydrogen (Default)");
                   setStep("ready_voice");
                 }}
-                className="w-full py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-2xl font-bold text-xs transition-all cursor-pointer"
+                className="w-full py-3 px-4 bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.1] text-[#e2e8f0] rounded-2xl font-semibold text-xs transition-all cursor-pointer"
               >
                 Continue with Default Profile
               </button>
               <button
                 onClick={() => setStep("carousel")}
-                className="w-full py-2 text-xs text-gray-500 hover:text-gray-800 font-semibold transition-colors cursor-pointer"
+                className="w-full py-2 text-xs text-[#94a3b8] hover:text-white font-medium transition-colors cursor-pointer"
               >
                 Explore Features Tour
               </button>
@@ -340,14 +340,16 @@ export const OnboardingModal: React.FC = () => {
                   <div
                     key={idx}
                     className={`h-1.5 rounded-full transition-all ${
-                      idx === carouselIndex ? "w-6 bg-[#E31B23]" : "w-1.5 bg-gray-200"
+                      idx === carouselIndex
+                        ? "w-6 bg-gradient-to-r from-[#FF1E8A] to-[#00E5FF]"
+                        : "w-1.5 bg-white/[0.18]"
                     }`}
                   />
                 ))}
               </div>
               <button
                 onClick={() => setStep("signin")}
-                className="text-xs text-gray-500 font-semibold hover:text-gray-900 cursor-pointer"
+                className="text-xs text-[#94a3b8] font-medium hover:text-white cursor-pointer"
               >
                 Skip
               </button>
@@ -355,13 +357,13 @@ export const OnboardingModal: React.FC = () => {
 
             <div className="my-auto py-6 flex flex-col items-center text-center">
               {React.createElement(carouselSlides[carouselIndex].icon, {
-                className: `w-16 h-16 p-3 rounded-2xl mb-5 ${carouselSlides[carouselIndex].color}`
+                className: `w-16 h-16 p-3.5 rounded-2xl mb-5 ${carouselSlides[carouselIndex].color}`
               })}
-              <h3 className="text-xl font-bold text-gray-900">{carouselSlides[carouselIndex].title}</h3>
-              <p className="text-xs text-gray-600 mt-2 leading-relaxed max-w-xs">
+              <h3 className="font-display text-xl font-semibold text-white">{carouselSlides[carouselIndex].title}</h3>
+              <p className="text-xs text-[#cbd5e1] mt-2 leading-relaxed max-w-xs">
                 {carouselSlides[carouselIndex].description}
               </p>
-              <div className="mt-5 w-full bg-gray-50 border border-gray-100 rounded-2xl p-3 text-left text-[11px] font-mono text-gray-700 whitespace-pre-line shadow-inner">
+              <div className="mt-5 w-full bg-[#181c2b] border border-white/[0.08] rounded-2xl p-3.5 text-left text-[11px] font-mono text-[#cbd5e1] whitespace-pre-line">
                 {carouselSlides[carouselIndex].preview}
               </div>
             </div>
@@ -370,7 +372,7 @@ export const OnboardingModal: React.FC = () => {
               {carouselIndex > 0 && (
                 <button
                   onClick={() => setCarouselIndex(carouselIndex - 1)}
-                  className="flex-1 py-3 px-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-xs cursor-pointer"
+                  className="flex-1 py-3 px-4 bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.08] text-[#cbd5e1] rounded-xl font-semibold text-xs cursor-pointer"
                 >
                   Back
                 </button>
@@ -383,7 +385,7 @@ export const OnboardingModal: React.FC = () => {
                     setStep("signin");
                   }
                 }}
-                className="flex-2 py-3 px-4 bg-[#E31B23] text-white rounded-xl font-bold text-xs shadow-md cursor-pointer"
+                className="flex-2 py-3 px-4 btn-diptik-primary text-white rounded-xl font-semibold text-xs shadow-md cursor-pointer"
               >
                 {carouselIndex === carouselSlides.length - 1 ? "Get Started" : "Next"}
               </button>
@@ -393,21 +395,21 @@ export const OnboardingModal: React.FC = () => {
 
         {/* Step 4: Sign In & Quick Default / Profile Launcher */}
         {step === "signin" && (
-          <div className="flex-1 flex flex-col justify-between p-6 sm:p-7 overflow-y-auto text-left">
+          <div className="flex-1 flex flex-col justify-between p-6 sm:p-7 overflow-y-auto text-left gemini-scroll">
             <div>
-              <div className="flex items-center space-x-2.5 mb-2">
+              <div className="flex items-center space-x-2.5 mb-2 pr-8">
                 <DiptiKLogo size="sm" showText={false} />
                 <div>
-                  <h3 className="text-lg font-extrabold text-gray-900">Sign In or Choose Profile</h3>
-                  <p className="text-[11px] text-gray-500">Create your own profile or use a default preset</p>
+                  <h3 className="font-display text-lg font-semibold text-white">Sign In or Choose Profile</h3>
+                  <p className="text-[11px] text-[#94a3b8]">Create your own profile or use a default preset</p>
                 </div>
               </div>
 
               {authError && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium space-y-1">
+                <div className="mt-3 p-3 bg-[#FF1744]/15 border border-[#FF1744]/35 rounded-xl text-xs text-[#ffb3c0] font-medium space-y-1">
                   <p>{authError}</p>
                   {showConsoleHelp && (
-                    <p className="text-[10px] text-red-600">
+                    <p className="text-[10px] text-[#ffb3c0]/80">
                       To enable Email/Password in Firebase: open Firebase Console &rarr; Authentication &rarr; Sign-in method &rarr; Enable Email/Password.
                     </p>
                   )}
@@ -419,7 +421,7 @@ export const OnboardingModal: React.FC = () => {
                 type="button"
                 onClick={handleGoogleLogin}
                 disabled={isLoading}
-                className="mt-4 w-full py-3 px-4 bg-white hover:bg-gray-50 border border-gray-300 rounded-2xl text-xs font-extrabold text-gray-800 shadow-xs transition-all flex items-center justify-center space-x-2.5 cursor-pointer"
+                className="mt-4 w-full py-3 px-4 bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.15] rounded-2xl text-xs font-semibold text-white shadow-xs transition-all flex items-center justify-center space-x-2.5 cursor-pointer"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
@@ -437,7 +439,7 @@ export const OnboardingModal: React.FC = () => {
                   setAuthError("");
                   setStep("create_profile");
                 }}
-                className="mt-2.5 w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-2xl text-xs font-extrabold shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer"
+                className="mt-2.5 w-full py-3 px-4 btn-diptik-primary text-white rounded-2xl text-xs font-semibold shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <UserPlus className="w-4 h-4" />
                 <span>Create Your Own Custom Profile</span>
@@ -446,7 +448,7 @@ export const OnboardingModal: React.FC = () => {
               {/* Saved Profiles Switcher if any */}
               {savedLocalProfiles.length > 0 && (
                 <div className="mt-4">
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+                  <span className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider block mb-1.5">
                     Saved Profiles & Default Presets
                   </span>
                   <div className="grid grid-cols-2 gap-2">
@@ -458,15 +460,15 @@ export const OnboardingModal: React.FC = () => {
                           switchLocalProfile(prof);
                           setStep("ready_voice");
                         }}
-                        className="p-2.5 rounded-xl border border-gray-200 hover:border-[#E31B23] bg-gray-50 hover:bg-[#FFF0F1]/40 text-left transition-all cursor-pointer"
+                        className="p-2.5 rounded-xl border border-white/[0.08] hover:border-[#0072FF] bg-[#181c2b] hover:bg-[#1f2437] text-left transition-all cursor-pointer"
                       >
                         <div className="flex items-center space-x-2">
-                          <div className="w-7 h-7 rounded-lg bg-[#E31B23] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#FF1E8A] via-[#8A2BE2] to-[#0072FF] text-white text-xs font-bold flex items-center justify-center shrink-0">
                             {prof.nickname?.[0] || prof.name?.[0] || "U"}
                           </div>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-gray-900 block truncate">{prof.nickname || prof.name}</span>
-                            <span className="text-[9px] text-gray-500 block truncate">{prof.defaultEngine?.split(" (")[0]}</span>
+                            <span className="text-xs font-semibold text-white block truncate">{prof.nickname || prof.name}</span>
+                            <span className="text-[10px] text-[#94a3b8] block truncate">{prof.defaultEngine?.split(" (")[0]}</span>
                           </div>
                         </div>
                       </button>
@@ -476,8 +478,8 @@ export const OnboardingModal: React.FC = () => {
               )}
 
               {/* Default Engine Quick Start (Gemini, ChatGPT, Claude, Offline) */}
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1.5">
+              <div className="mt-3 pt-3 border-t border-white/[0.08]">
+                <span className="text-[10px] font-semibold text-[#94a3b8] uppercase tracking-wider block mb-1.5">
                   Or Use Default With Preferred AI Engine
                 </span>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -489,10 +491,10 @@ export const OnboardingModal: React.FC = () => {
                         useDefaultProfilePreset(eng.id);
                         setStep("ready_voice");
                       }}
-                      className="p-2 rounded-xl border border-gray-200 hover:border-purple-400 hover:bg-purple-50/40 text-left transition-all cursor-pointer"
+                      className="p-2.5 rounded-xl border border-white/[0.08] bg-[#181c2b] hover:border-[#0072FF] hover:bg-[#1f2437] text-left transition-all cursor-pointer"
                     >
-                      <span className="text-[11px] font-bold text-gray-900 block truncate">{eng.label}</span>
-                      <span className="text-[9px] text-gray-500 block truncate">{eng.desc}</span>
+                      <span className="text-[11px] font-semibold text-white block truncate">{eng.label}</span>
+                      <span className="text-[9px] text-[#94a3b8] block truncate">{eng.desc}</span>
                     </button>
                   ))}
                 </div>
@@ -501,44 +503,44 @@ export const OnboardingModal: React.FC = () => {
               {/* Divider for Email Sign In */}
               <div className="relative my-4">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-200" />
+                  <div className="w-full border-t border-white/[0.08]" />
                 </div>
                 <div className="relative flex justify-center text-[10px]">
-                  <span className="px-2 bg-white text-gray-400 font-bold uppercase">Or Email Sign In</span>
+                  <span className="px-2 bg-[#121520] text-[#64748b] font-semibold uppercase">Or Email Sign In</span>
                 </div>
               </div>
 
               <form onSubmit={handleEmailSignIn} className="space-y-3">
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                  <Mail className="w-4 h-4 text-[#64748b] absolute left-3 top-2.5" />
                   <input
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#E31B23]"
+                    className="w-full pl-9 pr-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] focus:outline-none focus:border-[#0072FF]"
                     placeholder="Email address"
                   />
                 </div>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                  <Lock className="w-4 h-4 text-[#64748b] absolute left-3 top-2.5" />
                   <input
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    className="w-full pl-9 pr-16 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#E31B23]"
+                    className="w-full pl-9 pr-20 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] focus:outline-none focus:border-[#0072FF]"
                     placeholder="Password"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-8 top-2.5 text-gray-400 hover:text-gray-600"
+                    className="absolute right-12 top-2.5 text-[#64748b] hover:text-white cursor-pointer"
                   >
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                   <button
                     type="button"
                     onClick={() => setStep("forgot")}
-                    className="absolute right-2.5 top-2.5 text-[10px] text-[#E31B23] font-bold hover:underline"
+                    className="absolute right-2.5 top-2.5 text-[10px] text-[#00E5FF] font-semibold hover:underline cursor-pointer"
                   >
                     Reset
                   </button>
@@ -548,7 +550,7 @@ export const OnboardingModal: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="flex-1 py-2.5 bg-[#E31B23] hover:bg-[#BF141B] text-white rounded-xl font-bold text-xs shadow-sm transition-all flex items-center justify-center space-x-1 cursor-pointer"
+                    className="flex-1 py-2.5 btn-diptik-primary text-white rounded-xl font-semibold text-xs shadow-sm transition-all flex items-center justify-center space-x-1 cursor-pointer"
                   >
                     {isLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Sign In</span>}
                   </button>
@@ -558,7 +560,7 @@ export const OnboardingModal: React.FC = () => {
                       setAuthError("");
                       setStep("register");
                     }}
-                    className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold text-xs cursor-pointer"
+                    className="px-4 py-2.5 bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.1] text-[#e2e8f0] rounded-xl font-semibold text-xs cursor-pointer whitespace-nowrap"
                   >
                     Sign Up
                   </button>
@@ -570,18 +572,18 @@ export const OnboardingModal: React.FC = () => {
 
         {/* Step 4B: Create Your Own Custom Profile (Instant & Persistent) */}
         {step === "create_profile" && (
-          <div className="flex-1 flex flex-col justify-between p-6 sm:p-7 overflow-y-auto text-left">
+          <div className="flex-1 flex flex-col justify-between p-6 sm:p-7 overflow-y-auto text-left gemini-scroll">
             <div>
-              <h3 className="text-lg font-extrabold text-gray-900 flex items-center space-x-2">
-                <UserPlus className="w-5 h-5 text-purple-600" />
+              <h3 className="font-display text-lg font-semibold text-white flex items-center space-x-2">
+                <UserPlus className="w-5 h-5 text-[#00E5FF]" />
                 <span>Create Your Profile</span>
               </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-xs text-[#94a3b8] mt-0.5">
                 Personalize your identity, default AI engine, and live agent voice.
               </p>
 
               {authError && (
-                <div className="mt-3 p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+                <div className="mt-3 p-2.5 bg-[#FF1744]/15 border border-[#FF1744]/35 rounded-xl text-xs text-[#ffb3c0]">
                   {authError}
                 </div>
               )}
@@ -589,41 +591,41 @@ export const OnboardingModal: React.FC = () => {
               <form onSubmit={handleCreateCustomProfile} className="mt-4 space-y-3">
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Full Name *</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Full Name *</label>
                     <input
                       type="text"
                       value={name}
                       onChange={e => setName(e.target.value)}
                       required
                       placeholder="e.g. Alex Rivera"
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Call Me (Nickname)</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Call Me (Nickname)</label>
                     <input
                       type="text"
                       value={nickname}
                       onChange={e => setNickname(e.target.value)}
                       placeholder="e.g. Alex"
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-bold text-gray-700 uppercase">Email (Optional)</label>
+                  <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Email (Optional)</label>
                   <input
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="alex@example.com"
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                    className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-bold text-gray-700 uppercase block mb-1.5">
+                  <label className="text-[10px] font-semibold text-[#94a3b8] uppercase block mb-1.5">
                     Default AI Engine (Gemini, ChatGPT, Claude, Local)
                   </label>
                   <div className="grid grid-cols-2 gap-2">
@@ -634,12 +636,12 @@ export const OnboardingModal: React.FC = () => {
                         onClick={() => setSelectedEngine(eng.id)}
                         className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
                           selectedEngine === eng.id
-                            ? "bg-purple-50 border-purple-600 ring-1 ring-purple-600"
-                            : "bg-white border-gray-200 hover:bg-gray-50"
+                            ? "bg-[#0072FF]/15 border-[#0072FF] text-white"
+                            : "bg-[#181c2b] border-white/[0.08] hover:bg-[#1f2437]"
                         }`}
                       >
-                        <span className="text-[11px] font-bold text-gray-900 block">{eng.label}</span>
-                        <span className="text-[9px] text-gray-500 block truncate">{eng.desc}</span>
+                        <span className="text-[11px] font-semibold text-white block">{eng.label}</span>
+                        <span className="text-[9px] text-[#94a3b8] block truncate">{eng.desc}</span>
                       </button>
                     ))}
                   </div>
@@ -647,33 +649,33 @@ export const OnboardingModal: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase flex items-center space-x-1">
-                      <Volume2 className="w-3 h-3 text-[#E31B23]" />
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase flex items-center space-x-1">
+                      <Volume2 className="w-3 h-3 text-[#FF1E8A]" />
                       <span>Agent Voice</span>
                     </label>
                     <select
                       value={selectedVoice}
                       onChange={e => setSelectedVoice(e.target.value as VoicePersonaName)}
-                      className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-2.5 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white mt-1 focus:outline-none focus:border-[#0072FF]"
                     >
                       {VOICE_OPTIONS.map(v => (
-                        <option key={v} value={v}>
+                        <option key={v} value={v} className="bg-[#181c2b] text-white">
                           {v} (Live Voice)
                         </option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Persona</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Persona</label>
                     <select
                       value={selectedPersona}
                       onChange={e => setSelectedPersona(e.target.value)}
-                      className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-2.5 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white mt-1 focus:outline-none focus:border-[#0072FF]"
                     >
-                      <option>Default (Friendly & Helpful)</option>
-                      <option>Professional (Formal & Concise)</option>
-                      <option>Creative (Expressive & Imaginative)</option>
-                      <option>Academic (Detailed & Analytical)</option>
+                      <option className="bg-[#181c2b] text-white">Default (Friendly & Helpful)</option>
+                      <option className="bg-[#181c2b] text-white">Professional (Formal & Concise)</option>
+                      <option className="bg-[#181c2b] text-white">Creative (Expressive & Imaginative)</option>
+                      <option className="bg-[#181c2b] text-white">Academic (Detailed & Analytical)</option>
                     </select>
                   </div>
                 </div>
@@ -682,14 +684,14 @@ export const OnboardingModal: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setStep("signin")}
-                    className="py-2.5 px-4 bg-gray-100 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"
+                    className="py-2.5 px-4 bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.08] text-[#cbd5e1] rounded-xl text-xs font-semibold cursor-pointer"
                   >
                     Back
                   </button>
                   <button
                     type="submit"
                     disabled={isLoading}
-                    className="flex-1 py-2.5 px-4 bg-[#E31B23] hover:bg-[#BF141B] text-white rounded-xl font-bold text-xs shadow-md flex items-center justify-center space-x-1.5 cursor-pointer"
+                    className="flex-1 py-2.5 px-4 btn-diptik-primary text-white rounded-xl font-semibold text-xs shadow-md flex items-center justify-center space-x-1.5 cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
                     <span>Save Profile & Start</span>
@@ -702,13 +704,13 @@ export const OnboardingModal: React.FC = () => {
 
         {/* Step 5: Email Account Registration */}
         {step === "register" && (
-          <div className="flex-1 flex flex-col justify-between p-6 sm:p-7 overflow-y-auto text-left">
+          <div className="flex-1 flex flex-col justify-between p-6 sm:p-7 overflow-y-auto text-left gemini-scroll">
             <div>
-              <h3 className="text-lg font-extrabold text-gray-900">Create Authenticated Account</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Sync your profile, custom agents, and voice preferences</p>
+              <h3 className="font-display text-lg font-semibold text-white">Create Authenticated Account</h3>
+              <p className="text-xs text-[#94a3b8] mt-0.5">Sync your profile, custom agents, and voice preferences</p>
 
               {authError && (
-                <div className="mt-3 p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 space-y-1.5">
+                <div className="mt-3 p-2.5 bg-[#FF1744]/15 border border-[#FF1744]/35 rounded-xl text-xs text-[#ffb3c0] space-y-1.5">
                   <p>{authError}</p>
                   {showConsoleHelp && (
                     <button
@@ -723,7 +725,7 @@ export const OnboardingModal: React.FC = () => {
                           persona: selectedPersona
                         }).then(() => setStep("ready_voice"))
                       }
-                      className="px-3 py-1.5 bg-[#E31B23] text-white rounded-lg text-[11px] font-bold cursor-pointer"
+                      className="px-3 py-1.5 btn-diptik-primary text-white rounded-lg text-[11px] font-semibold cursor-pointer"
                     >
                       Save as Local Profile & Start
                     </button>
@@ -734,76 +736,76 @@ export const OnboardingModal: React.FC = () => {
               <form onSubmit={handleRegisterEmail} className="mt-3 space-y-2.5">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Full Name</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Full Name</label>
                     <input
                       type="text"
                       value={name}
                       onChange={e => setName(e.target.value)}
                       required
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                       placeholder="Your Name"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Nickname</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Nickname</label>
                     <input
                       type="text"
                       value={nickname}
                       onChange={e => setNickname(e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                       placeholder="Short name"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-bold text-gray-700 uppercase">Email Address</label>
+                  <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Email Address</label>
                   <input
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                    className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                     placeholder="you@example.com"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Default Engine</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Default Engine</label>
                     <select
                       value={selectedEngine}
                       onChange={e => setSelectedEngine(e.target.value)}
-                      className="w-full px-2 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-2 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white mt-1 focus:outline-none focus:border-[#0072FF]"
                     >
                       {AI_ENGINES.map(e => (
-                        <option key={e.id} value={e.id}>{e.label}</option>
+                        <option key={e.id} value={e.id} className="bg-[#181c2b] text-white">{e.label}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-gray-700 uppercase">Voice Persona</label>
+                    <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Voice Persona</label>
                     <select
                       value={selectedVoice}
                       onChange={e => setSelectedVoice(e.target.value as VoicePersonaName)}
-                      className="w-full px-2 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                      className="w-full px-2 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white mt-1 focus:outline-none focus:border-[#0072FF]"
                     >
                       {VOICE_OPTIONS.map(v => (
-                        <option key={v} value={v}>{v}</option>
+                        <option key={v} value={v} className="bg-[#181c2b] text-white">{v}</option>
                       ))}
                     </select>
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-bold text-gray-700 uppercase">Create Password</label>
+                  <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Create Password</label>
                   <input
                     type="password"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     required
                     minLength={6}
-                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium mt-1"
+                    className="w-full px-3 py-2 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs font-medium text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                     placeholder="Minimum 6 characters"
                   />
                 </div>
@@ -811,19 +813,19 @@ export const OnboardingModal: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-3 bg-[#E31B23] hover:bg-[#BF141B] text-white rounded-xl font-bold text-xs shadow-md mt-2 flex items-center justify-center space-x-2 cursor-pointer"
+                  className="w-full py-3 btn-diptik-primary text-white rounded-xl font-semibold text-xs shadow-md mt-2 flex items-center justify-center space-x-2 cursor-pointer"
                 >
                   {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <span>Create Account & Continue</span>}
                 </button>
               </form>
             </div>
 
-            <div className="mt-3 pt-3 border-t border-gray-100 text-center">
+            <div className="mt-3 pt-3 border-t border-white/[0.08] text-center">
               <button
                 onClick={() => setStep("signin")}
-                className="text-xs text-gray-600 font-semibold hover:text-gray-900 cursor-pointer"
+                className="text-xs text-[#94a3b8] font-medium hover:text-white cursor-pointer"
               >
-                Already have an account? <span className="text-[#E31B23]">Sign In</span>
+                Already have an account? <span className="text-[#00E5FF] font-semibold">Sign In</span>
               </button>
             </div>
           </div>
@@ -833,29 +835,29 @@ export const OnboardingModal: React.FC = () => {
         {step === "ready_voice" && (
           <div className="flex-1 flex flex-col justify-between p-7 text-center min-h-[440px]">
             <div className="my-auto space-y-4">
-              <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+              <div className="w-16 h-16 rounded-3xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto shadow-sm">
                 <Check className="w-8 h-8" />
               </div>
               <div>
-                <h3 className="text-xl font-extrabold text-gray-900">
+                <h3 className="font-display text-xl font-semibold text-white">
                   Welcome, {userProfile.nickname || userProfile.name}!
                 </h3>
-                <p className="text-xs text-gray-600 mt-1">
-                  Profile active with <strong>{userProfile.defaultEngine}</strong> and voice <strong>{userProfile.voiceName || "Zephyr"}</strong>.
+                <p className="text-xs text-[#94a3b8] mt-1">
+                  Profile active with <strong className="text-white">{userProfile.defaultEngine}</strong> and voice <strong className="text-[#00E5FF]">{userProfile.voiceName || "Zephyr"}</strong>.
                 </p>
               </div>
               {authSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-800">
+                <div className="p-3 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-200">
                   {authSuccess}
                 </div>
               )}
 
-              <div className="p-4 bg-gradient-to-br from-gray-900 to-indigo-950 text-white rounded-2xl text-left space-y-3 shadow-lg">
+              <div className="p-4 bg-[#181c2b] border border-[#0072FF]/35 text-white rounded-2xl text-left space-y-3 shadow-lg">
                 <div className="flex items-center space-x-2">
-                  <Bot className="w-5 h-5 text-emerald-400" />
-                  <span className="text-xs font-extrabold uppercase tracking-wider">Real-Time Voice Agent Ready</span>
+                  <Bot className="w-5 h-5 text-[#00E5FF]" />
+                  <span className="text-xs font-semibold uppercase tracking-wider text-[#00E5FF]">Real-Time Voice Agent Ready</span>
                 </div>
-                <p className="text-[11px] text-gray-300 leading-relaxed">
+                <p className="text-[11px] text-[#cbd5e1] leading-relaxed">
                   Talk naturally with your AI agent in real time using Gemini Live Audio, or open Assistant Setup to fine-tune permissions.
                 </p>
                 <button
@@ -864,7 +866,7 @@ export const OnboardingModal: React.FC = () => {
                     closeAll();
                     openVoiceWithAgent(null);
                   }}
-                  className="w-full py-3 px-4 bg-[#E31B23] hover:bg-[#BF141B] text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center space-x-2 cursor-pointer"
+                  className="w-full py-3 px-4 btn-diptik-primary text-white rounded-xl text-xs font-semibold shadow-md flex items-center justify-center space-x-2 cursor-pointer"
                 >
                   <Mic className="w-4 h-4" />
                   <span>Talk to Agent in Real Time</span>
@@ -879,14 +881,14 @@ export const OnboardingModal: React.FC = () => {
                   closeAll();
                   setShowAssistantSetup(true);
                 }}
-                className="flex-1 py-2.5 px-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold cursor-pointer"
+                className="flex-1 py-2.5 px-3 bg-[#181c2b] hover:bg-[#1f2437] border border-white/[0.1] text-[#e2e8f0] rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Customize More
               </button>
               <button
                 type="button"
                 onClick={closeAll}
-                className="flex-1 py-2.5 px-3 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                className="flex-1 py-2.5 px-3 bg-[#0072FF] hover:bg-[#005ce6] text-white rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Open Dashboard
               </button>
@@ -898,24 +900,24 @@ export const OnboardingModal: React.FC = () => {
         {step === "forgot" && (
           <div className="flex-1 flex flex-col justify-between p-7 text-center min-h-[400px]">
             <div>
-              <Shield className="w-12 h-12 text-[#E31B23] mx-auto mb-3" />
-              <h3 className="text-lg font-extrabold text-gray-900">Reset Password</h3>
-              <p className="text-xs text-gray-500 mt-1">Enter your registered email to receive a password reset link.</p>
+              <Shield className="w-12 h-12 text-[#00E5FF] mx-auto mb-3" />
+              <h3 className="font-display text-lg font-semibold text-white">Reset Password</h3>
+              <p className="text-xs text-[#94a3b8] mt-1">Enter your registered email to receive a password reset link.</p>
 
               {authError && (
-                <div className="mt-3 p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">{authError}</div>
+                <div className="mt-3 p-2.5 bg-[#FF1744]/15 border border-[#FF1744]/35 rounded-xl text-xs text-[#ffb3c0]">{authError}</div>
               )}
               {authSuccess && (
-                <div className="mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700">{authSuccess}</div>
+                <div className="mt-3 p-2.5 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-xs text-emerald-200">{authSuccess}</div>
               )}
 
               <div className="mt-5 text-left">
-                <label className="text-[10px] font-bold text-gray-700 uppercase">Email Address</label>
+                <label className="text-[10px] font-semibold text-[#94a3b8] uppercase">Email Address</label>
                 <input
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs mt-1"
+                  className="w-full px-3 py-2.5 bg-[#181c2b] border border-white/[0.1] rounded-xl text-xs text-white placeholder-[#64748b] mt-1 focus:outline-none focus:border-[#0072FF]"
                   placeholder="you@example.com"
                 />
               </div>
@@ -934,14 +936,14 @@ export const OnboardingModal: React.FC = () => {
                     setAuthError(err?.message || "Could not send reset email.");
                   }
                 }}
-                className="w-full py-3 bg-[#E31B23] text-white rounded-xl font-bold text-xs shadow-md cursor-pointer"
+                className="w-full py-3 btn-diptik-primary text-white rounded-xl font-semibold text-xs shadow-md cursor-pointer"
               >
                 Send Reset Link
               </button>
               <button
                 type="button"
                 onClick={() => setStep("signin")}
-                className="text-xs text-gray-600 font-semibold cursor-pointer"
+                className="text-xs text-[#94a3b8] hover:text-white font-medium cursor-pointer"
               >
                 Back to Sign In
               </button>

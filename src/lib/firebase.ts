@@ -10,6 +10,7 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
+  deleteUser,
   User
 } from "firebase/auth";
 import {
@@ -107,6 +108,7 @@ export {
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
+  deleteUser,
   doc,
   getDoc,
   setDoc,

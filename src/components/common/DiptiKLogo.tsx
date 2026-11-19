@@ -156,8 +156,8 @@ export const DiptiKLogo: React.FC<DiptiKLogoProps> = ({
           <line x1="50" y1="14" x2="50" y2="86" stroke="#8A2BE2" strokeWidth="1" strokeDasharray="3 1" />
         </svg>
 
-        {/* Subtle pulsing glow behind logo */}
-        <div className="absolute -inset-1 bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500 rounded-full blur-sm opacity-30 animate-pulse -z-10" />
+        {/* Subtle ambient glow behind logo */}
+        <div className="absolute -inset-1 bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500 rounded-full blur-sm opacity-25 -z-10" />
       </div>
 
       {/* Typography: DiptiK AI in Gradient matching logo */}

@@ -12,18 +12,19 @@ import {
   NotificationItem,
   UserProfile,
   PermissionItem,
-  OfflineModelPackage
+  OfflineModelPackage,
+  NotebookItem
 } from "../types";
 
 export const initialUserProfile: UserProfile = {
-  name: "Default User",
-  nickname: "Explorer",
-  email: "default@diptik.ai",
+  name: "MD SIRAJUL ISLAM",
+  nickname: "Sirajul",
+  email: "msirajul.betopia@gmail.com",
   phone: "+1 (555) 382-9104",
-  country: "United States",
+  country: "Bangladesh",
   language: "English (US)",
   plan: "Pro AI Agent",
-  avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80",
+  avatar: "",
   style: "Balanced",
   speed: "1.0x",
   wakePhrase: true,
@@ -36,7 +37,7 @@ export const initialUserProfile: UserProfile = {
   authProvider: "default",
   voiceName: "Zephyr",
   customInstructions: "Always provide clear, well-structured summaries and bullet points.",
-  theme: "light",
+  theme: "dark",
   wakeWordEnabled: true
 };
 
@@ -162,14 +163,120 @@ export const initialOfflinePackages: OfflineModelPackage[] = [
   }
 ];
 
+export const initialNotebooks: NotebookItem[] = [
+  {
+    id: "nb_solar",
+    title: "The Smart Solar Lamp Revolution",
+    description: "Off-grid lithium iron phosphate lamp architecture, MPPT charge controller notes, and rural distribution metrics.",
+    content: "## Smart Solar Lamp Architecture\n\n- **Battery Chemistry**: LiFePO4 3.2V 6000mAh cells for 2,000+ charge cycles in high-temperature climates.\n- **Solar Panel**: 5W monocrystalline panel with weatherproof IP67 casing.\n- **Smart Dimming**: Ambient light sensor + PIR motion trigger extends runtime up to 48 hours.\n\n### Next Research Steps\n1. Compare unit BOM cost at 10,000-unit manufacturing scale.\n2. Draft pay-as-you-go mobile telemetry protocol.",
+    tags: ["Hardware", "Clean Energy", "IoT"],
+    updatedAt: "Today",
+    pinned: true
+  },
+  {
+    id: "nb_fish",
+    title: "Farming Fish",
+    description: "Biofloc aquaculture water quality thresholds, dissolved oxygen automation, and feed conversion tracking.",
+    content: "## Aquaculture & Pond Management Notes\n\n- **Dissolved Oxygen (DO)**: Maintain above 5.0 mg/L; trigger backup aerators automatically if DO drops below 4.2 mg/L.\n- **Ammonia & Nitrite**: Monitor daily; keep unionized ammonia < 0.05 ppm.\n- **Feeding Schedule**: Split into 3 timed feedings at 07:30, 13:00, and 17:30 based on biomass estimates.\n\n### Key Metrics\n- Target FCR (Feed Conversion Ratio): `1.35`\n- Optimal water temp: `26°C – 30°C`",
+    tags: ["Aquaculture", "Operations", "Sensors"],
+    updatedAt: "Yesterday",
+    pinned: false
+  },
+  {
+    id: "nb_dl",
+    title: "Deep Learning",
+    description: "Transformer attention optimizations, INT4/INT8 on-device quantization, and multimodal retrieval benchmarks.",
+    content: "## Deep Learning & Edge Quantization\n\n- **FlashAttention & KV-Cache**: Reduces memory footprint from quadratic to linear during long-context inference.\n- **Quantization**: 4-bit AWQ / GGUF retains >98% perplexity accuracy while running smoothly on mobile NPUs.\n- **Hybrid Routing**: Route complex multi-document synthesis to cloud reasoning models and deterministic commands locally.",
+    tags: ["AI Research", "ML", "Edge"],
+    updatedAt: "2 days ago",
+    pinned: true
+  }
+];
+
 export const initialConversations: ChatConversation[] = [
+  {
+    id: "conv_cover",
+    title: "Cover Image Design Concept",
+    lastMessage: "Here are three minimalist dark-mode cover composition directions using deep cobalt light.",
+    updatedAt: "25 mins ago",
+    mode: "Create",
+    isPinned: true,
+    messages: [
+      {
+        id: "m_cover_1",
+        sender: "user",
+        text: "Help me brainstorm a clean cover image design concept for our AI productivity workspace launch.",
+        timestamp: "10:15 AM",
+        mode: "Create"
+      },
+      {
+        id: "m_cover_2",
+        sender: "ai",
+        text: "Here are three focused dark-mode visual concepts:\n\n1. **Obsidian Horizon**: Deep `#0e0f12` canvas with a soft cobalt-blue radial glow behind subtle 1px architectural wireframe grids.\n2. **Monochrome Glass Prism**: Single refractive glass geometry casting cool sapphire light over clean editorial typography.\n3. **Minimal Typographic Anchor**: High-contrast white headline centered with generous negative space and crisp geometric vector accents.",
+        timestamp: "10:15 AM",
+        mode: "Create",
+        modelUsed: "gemini-4-hydrogen",
+        suggestedCommands: ["Refine Obsidian Horizon palette", "Draft social launch copy", "Generate matching icon cues"]
+      }
+    ]
+  },
+  {
+    id: "conv_mobile",
+    title: "Mobile App Project Details",
+    lastMessage: "Outlined the hybrid offline-first architecture, 3-level confirmation safeguards, and live voice pipeline.",
+    updatedAt: "2 hours ago",
+    mode: "Ask",
+    isPinned: true,
+    messages: [
+      {
+        id: "m_mob_1",
+        sender: "user",
+        text: "Summarize the core architecture details for the Mobile App Project.",
+        timestamp: "8:40 AM",
+        mode: "Ask"
+      },
+      {
+        id: "m_mob_2",
+        sender: "ai",
+        text: "### Mobile App Project Architecture\n\n- **Dual-Engine Execution**: Seamless switching between cloud reasoning and on-device offline tools.\n- **Real-Time Voice**: 16kHz audio streaming with low-latency spoken responses and live transcripts.\n- **3-Tier Safeguards**: Level 1 safe read/timers, Level 2 user confirmation for calls/SMS, and Level 3 PIN/biometric gate for destructive actions.",
+        timestamp: "8:41 AM",
+        mode: "Ask",
+        modelUsed: "gemini-4-hydrogen"
+      }
+    ]
+  },
+  {
+    id: "conv_opsori",
+    title: "Opsori Agro",
+    lastMessage: "Structured the Opsori Agro supply chain tracker, farmer onboarding flow, and seasonal crop advisory.",
+    updatedAt: "Yesterday",
+    mode: "Research",
+    isPinned: false,
+    messages: [
+      {
+        id: "m_ops_1",
+        sender: "user",
+        text: "Outline a product roadmap and farmer onboarding workflow for Opsori Agro.",
+        timestamp: "4:10 PM",
+        mode: "Research"
+      },
+      {
+        id: "m_ops_2",
+        sender: "ai",
+        text: "### Opsori Agro — Product & Onboarding Blueprint\n\n1. **Field Registration**: Offline-capable mobile form capturing plot coordinates, soil profile, and crop cycle.\n2. **Advisory Alerts**: Automated weather, irrigation, and pest-risk notifications in local language.\n3. **Harvest & Marketplace Link**: Direct batch grading and logistics scheduling to minimize post-harvest loss.",
+        timestamp: "4:11 PM",
+        mode: "Research",
+        modelUsed: "gemini-4-hydrogen"
+      }
+    ]
+  },
   {
     id: "conv_1",
     title: "Morning Briefing & Calendar Plan",
     lastMessage: "Here is your executive morning summary for today. You have 3 priority meetings.",
-    updatedAt: "10 mins ago",
+    updatedAt: "Yesterday",
     mode: "Ask",
-    isPinned: true,
+    isPinned: false,
     messages: [
       {
         id: "m_1",

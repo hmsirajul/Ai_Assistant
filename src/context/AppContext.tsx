@@ -18,7 +18,11 @@ import {
   PermissionItem,
   OfflineModelPackage,
   PhoneAction,
-  VoicePersonaName
+  VoicePersonaName,
+  NotebookItem,
+  WorkspaceView,
+  ComposerTier,
+  PhoneBridgeConfig
 } from "../types";
 import {
   initialUserProfile,
@@ -33,7 +37,9 @@ import {
   initialTasks,
   initialActivityLogs,
   initialMemory,
-  initialNotifications
+  initialNotifications,
+  initialConversations,
+  initialNotebooks
 } from "../data/mockData";
 import { checkServerHealth, sendChatMessageStream } from "../services/api";
 import {
@@ -48,6 +54,7 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
   updateProfile,
+  deleteUser,
   doc,
   getDoc,
   setDoc,
@@ -67,7 +74,20 @@ const LOCAL_PROFILE_KEY = "diptik_active_profile_v1";
 const LOCAL_SAVED_PROFILES_KEY = "diptik_saved_profiles_v1";
 const LOCAL_AUTH_CHOSEN_KEY = "diptik_auth_chosen_v1";
 const LOCAL_CUSTOM_AGENTS_KEY = "diptik_custom_agents_v1";
-const LOCAL_CONVERSATIONS_PREFIX = "diptik_conversations_v1_";
+const LOCAL_CONVERSATIONS_PREFIX = "diptik_conversations_v2_";
+const LOCAL_NOTEBOOKS_KEY = "diptik_notebooks_v1";
+const LOCAL_DEV_MODE_KEY = "diptik_developer_mode_v1";
+const LOCAL_PHONE_BRIDGE_KEY = "diptik_phone_bridge_v1";
+
+const DEFAULT_PHONE_BRIDGE_CONFIG: PhoneBridgeConfig = {
+  channelType: "web_push",
+  webhookUrl: "",
+  telegramBotToken: "",
+  telegramChatId: "",
+  dailyBriefingTime: "08:00",
+  autoBriefingEnabled: false,
+  city: "Dhaka"
+};
 
 function getProfileStorageKey(profile: { uid?: string; email?: string; name?: string }): string {
   const raw = profile.uid || profile.email || profile.name || "default";
@@ -75,15 +95,15 @@ function getProfileStorageKey(profile: { uid?: string; email?: string; name?: st
 }
 
 function loadConversationsForProfile(profile: { uid?: string; email?: string; name?: string }): ChatConversation[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined") return initialConversations;
   try {
     const raw = localStorage.getItem(getProfileStorageKey(profile));
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch {}
-  return [];
+  return initialConversations;
 }
 
 function sanitizeForBlueprint(profile: UserProfile, uid: string) {
@@ -123,6 +143,10 @@ interface AppContextType {
   // Navigation & View Mode
   activeTab: "home" | "chat" | "agent" | "automations" | "profile";
   setActiveTab: (tab: any) => void;
+  activeWorkspaceView: WorkspaceView;
+  setActiveWorkspaceView: (view: WorkspaceView) => void;
+  composerTier: ComposerTier;
+  setComposerTier: (tier: ComposerTier) => void;
   profileSubTab: "profile" | "memory" | "logs" | "skills" | "integrations" | "settings" | "help";
   setProfileSubTab: (tab: any) => void;
   activeAIMode: AIMode;
@@ -169,6 +193,7 @@ interface AppContextType {
   savedLocalProfiles: UserProfile[];
   switchLocalProfile: (profile: UserProfile) => void;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 
   // User Profile & Settings
   userProfile: UserProfile;
@@ -221,6 +246,14 @@ interface AppContextType {
   toggleIntegration: (id: string) => void;
   toggleIntegrationConnection: (id: string) => void;
 
+  // Notebooks
+  notebooks: NotebookItem[];
+  activeNotebookId: string | null;
+  setActiveNotebookId: (id: string | null) => void;
+  addNotebook: (nb: Partial<NotebookItem>) => NotebookItem;
+  updateNotebook: (id: string, updates: Partial<NotebookItem>) => void;
+  deleteNotebook: (id: string) => void;
+
   // Knowledge, Notes & Tasks
   knowledge: KnowledgeItem[];
   knowledgeLibrary: KnowledgeItem[];
@@ -268,6 +301,16 @@ interface AppContextType {
   setIsPhoneActionsModalOpen: (val: boolean) => void;
   isErrorTesterModalOpen: boolean;
   setIsErrorTesterModalOpen: (val: boolean) => void;
+  isSettingsModalOpen: boolean;
+  setIsSettingsModalOpen: (val: boolean) => void;
+  isGetAppModalOpen: boolean;
+  setIsGetAppModalOpen: (val: boolean) => void;
+  isUpgradeModalOpen: boolean;
+  setIsUpgradeModalOpen: (val: boolean) => void;
+  developerMode: boolean;
+  setDeveloperMode: (val: boolean) => void;
+  phoneBridgeConfig: PhoneBridgeConfig;
+  updatePhoneBridgeConfig: (updates: Partial<PhoneBridgeConfig>) => void;
 
   // Level 1, 2, 3 Safeguard Confirmation Modal
   activeCommandConfirmation: {
@@ -297,23 +340,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [activeWorkspaceView, setActiveWorkspaceView] = useState<WorkspaceView>("chat");
+  const [composerTier, setComposerTierState] = useState<ComposerTier>("Auto");
   const [activeAIMode, setActiveAIMode] = useState<AIMode>("Ask");
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
-  const [isMobileFrame, setIsMobileFrame] = useState<boolean>(true);
+  const [isMobileFrame, setIsMobileFrame] = useState<boolean>(false);
   const [serverOnlineCapable, setServerOnlineCapable] = useState<boolean>(true);
   const [liveVoiceCapable, setLiveVoiceCapable] = useState<boolean>(true);
 
-  // Firebase Auth & Onboarding States
+  const setComposerTier = (tier: ComposerTier) => {
+    setComposerTierState(tier);
+    if (tier === "Offline") {
+      setIsOfflineMode(true);
+      setActiveAIMode("Offline");
+    } else {
+      setIsOfflineMode(false);
+      if (tier === "Pro") setActiveAIMode("Research");
+      else setActiveAIMode("Ask");
+    }
+  };
+
+  // Firebase Auth & Onboarding States (Never block arrival with a forced popup)
   const [authReady, setAuthReady] = useState<boolean>(false);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [showSplash, setShowSplash] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
-  const [showAuth, setShowAuth] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return !localStorage.getItem(LOCAL_AUTH_CHOSEN_KEY);
-    }
-    return true;
-  });
+  const [showAuth, setShowAuth] = useState<boolean>(false);
   const [showAssistantSetup, setShowAssistantSetup] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
@@ -364,6 +416,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [skills, setSkills] = useState<SkillItem[]>(initialSkills);
   const [integrations, setIntegrations] = useState<IntegrationItem[]>(initialIntegrations);
   const [knowledge, setKnowledge] = useState<KnowledgeItem[]>(initialKnowledge);
+  const [notebooks, setNotebooks] = useState<NotebookItem[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem(LOCAL_NOTEBOOKS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch {}
+    }
+    return initialNotebooks;
+  });
+  const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null);
   const [notes, setNotes] = useState<NoteItem[]>(initialNotes);
   const [tasks, setTasks] = useState<TaskItem[]>(initialTasks);
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(initialActivityLogs);
@@ -377,7 +442,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isNotesModalOpen, setIsNotesModalOpen] = useState<boolean>(false);
   const [isPhoneActionsModalOpen, setIsPhoneActionsModalOpen] = useState<boolean>(false);
   const [isErrorTesterModalOpen, setIsErrorTesterModalOpen] = useState<boolean>(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
+  const [isGetAppModalOpen, setIsGetAppModalOpen] = useState<boolean>(false);
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState<boolean>(false);
   const [activeCommandConfirmation, setActiveCommandConfirmation] = useState<any>(null);
+
+  const [developerMode, setDeveloperModeState] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return localStorage.getItem(LOCAL_DEV_MODE_KEY) === "true";
+      } catch {}
+    }
+    return false;
+  });
+
+  const setDeveloperMode = (val: boolean) => {
+    setDeveloperModeState(val);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(LOCAL_DEV_MODE_KEY, val ? "true" : "false");
+      } catch {}
+    }
+  };
+
+  const [phoneBridgeConfig, setPhoneBridgeConfig] = useState<PhoneBridgeConfig>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem(LOCAL_PHONE_BRIDGE_KEY);
+        if (raw) return { ...DEFAULT_PHONE_BRIDGE_CONFIG, ...JSON.parse(raw) };
+      } catch {}
+    }
+    return DEFAULT_PHONE_BRIDGE_CONFIG;
+  });
+
+  const updatePhoneBridgeConfig = (updates: Partial<PhoneBridgeConfig>) => {
+    setPhoneBridgeConfig(prev => {
+      const next = { ...prev, ...updates };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(LOCAL_PHONE_BRIDGE_KEY, JSON.stringify(next));
+        } catch {}
+      }
+      return next;
+    });
+  };
 
   const profileUnsubRef = useRef<(() => void) | null>(null);
   const agentsUnsubRef = useRef<(() => void) | null>(null);
@@ -409,6 +517,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch {}
     }
   }, [savedLocalProfiles]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(LOCAL_NOTEBOOKS_KEY, JSON.stringify(notebooks));
+      } catch {}
+    }
+  }, [notebooks]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -772,6 +888,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       title: "Signed Out",
       message: "Select a profile or sign in to continue.",
       category: "system"
+    });
+  };
+
+  const deleteAccount = async () => {
+    try {
+      if (auth.currentUser) {
+        try {
+          await deleteUser(auth.currentUser);
+        } catch {
+          await signOut(auth);
+        }
+      }
+    } catch (e) {
+      console.warn("Account cleanup signout notice:", e);
+    }
+    if (typeof window !== "undefined") {
+      try {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith("diptik_")) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch {}
+    }
+    setIsAuthenticated(false);
+    setUserProfile(initialUserProfile);
+    setSavedLocalProfiles([initialUserProfile]);
+    setConversations([]);
+    setActiveConversationId(null);
+    setCustomAgents([]);
+    setNotebooks(initialNotebooks);
+    setMemoryItems([]);
+    setActivityLogs([]);
+    setPhoneBridgeConfig(DEFAULT_PHONE_BRIDGE_CONFIG);
+    setIsSettingsModalOpen(false);
+    addNotification({
+      title: "Account Data Deleted",
+      message: "Your local workspace data and session have been permanently cleared.",
+      category: "security"
     });
   };
 
@@ -1250,6 +1405,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotes(prev => prev.filter(n => n.id !== id));
   };
 
+  const addNotebook = (nb: Partial<NotebookItem>): NotebookItem => {
+    const newNb: NotebookItem = {
+      id: `nb_${Date.now()}`,
+      title: nb.title?.trim() || "Untitled Notebook",
+      description: nb.description?.trim() || "Workspace notes and research synthesis.",
+      content: nb.content || `# ${nb.title?.trim() || "Untitled Notebook"}\n\nStart writing notes, ideas, or ask DiptiK AI 3 to synthesize your sources.`,
+      tags: nb.tags && nb.tags.length > 0 ? nb.tags : ["Notes"],
+      updatedAt: "Just now",
+      pinned: nb.pinned ?? false
+    };
+    setNotebooks(prev => [newNb, ...prev]);
+    return newNb;
+  };
+
+  const updateNotebook = (id: string, updates: Partial<NotebookItem>) => {
+    setNotebooks(prev =>
+      prev.map(nb => (nb.id === id ? { ...nb, ...updates, updatedAt: "Just now" } : nb))
+    );
+  };
+
+  const deleteNotebook = (id: string) => {
+    setNotebooks(prev => prev.filter(nb => nb.id !== id));
+    if (activeNotebookId === id) {
+      setActiveNotebookId(null);
+    }
+  };
+
   const addTask = (task: Partial<TaskItem>) => {
     const newTask: TaskItem = {
       id: `task_${Date.now()}`,
@@ -1386,6 +1568,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         activeTab,
         setActiveTab,
+        activeWorkspaceView,
+        setActiveWorkspaceView,
+        composerTier,
+        setComposerTier,
         profileSubTab,
         setProfileSubTab,
         activeAIMode,
@@ -1420,6 +1606,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         savedLocalProfiles,
         switchLocalProfile,
         logout,
+        deleteAccount,
         userProfile,
         updateUserProfile,
         permissions,
@@ -1460,6 +1647,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         knowledgeLibrary: knowledge,
         addKnowledgeItem,
         deleteKnowledgeItem,
+        notebooks,
+        activeNotebookId,
+        setActiveNotebookId,
+        addNotebook,
+        updateNotebook,
+        deleteNotebook,
         notes,
         addNote,
         updateNote,
@@ -1496,6 +1689,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsPhoneActionsModalOpen,
         isErrorTesterModalOpen,
         setIsErrorTesterModalOpen,
+        isSettingsModalOpen,
+        setIsSettingsModalOpen,
+        isGetAppModalOpen,
+        setIsGetAppModalOpen,
+        isUpgradeModalOpen,
+        setIsUpgradeModalOpen,
+        developerMode,
+        setDeveloperMode,
+        phoneBridgeConfig,
+        updatePhoneBridgeConfig,
         activeCommandConfirmation,
         setActiveCommandConfirmation
       }}

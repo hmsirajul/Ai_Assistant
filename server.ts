@@ -846,21 +846,233 @@ Include:
     });
   });
 
-  // 8. Phone Action Simulator Endpoints
+  // 8. Cloud Brain Daily Briefing, Push/Webhook Dispatch & Phone Action Execution
+  app.post("/api/phone/briefing", async (req, res) => {
+    try {
+      const {
+        city = "Dhaka",
+        tasks = [],
+        notes = [],
+        userProfile = {},
+        isOffline = false
+      } = req.body || {};
+
+      const activeTasks = (tasks as any[])
+        .filter(t => t.status !== "Completed")
+        .slice(0, 6)
+        .map(t => `- ${t.title} (${t.dueDate || "Today"} · ${t.time || "Anytime"} · ${t.priority || "Medium"})`)
+        .join("\n");
+
+      const recentNotes = (notes as any[])
+        .slice(0, 3)
+        .map(n => `- ${n.title}: ${(n.content || "").slice(0, 120)}`)
+        .join("\n");
+
+      const ai = !isOffline ? getAIClient() : null;
+      const nowStr = new Date().toLocaleString();
+
+      if (ai) {
+        try {
+          const prompt = `Create a crisp, actionable Mobile Daily Briefing for ${userProfile.nickname || userProfile.name || "User"} (${nowStr}).
+Location for weather/commute context: ${city}.
+Active scheduled tasks:
+${activeTasks || "- No pending tasks recorded"}
+Recent notes:
+${recentNotes || "- No recent notes"}
+
+Include 3 short sections with Markdown headings:
+1. Weather & Commute Pulse (include current conditions for ${city} via Google Search)
+2. Today's Schedule & Priority Actions
+3. Quick Phone Actions Suggested
+Keep total length concise (~160 words) so it reads cleanly on a phone notification feed.`;
+
+          const { response, usedModel } = await generateChatWithRetry(
+            ai,
+            [{ role: "user", parts: [{ text: prompt }] }],
+            "You are DiptiK AI 3 Cloud Brain generating a concise daily mobile briefing.",
+            true
+          );
+
+          return res.json({
+            briefing: response.text || "Your daily briefing is ready.",
+            sources: extractGroundingSources(response.candidates?.[0]?.groundingMetadata?.groundingChunks),
+            modelUsed: usedModel,
+            generatedAt: new Date().toISOString()
+          });
+        } catch (err) {
+          console.error("Daily briefing generation fallback:", err);
+        }
+      }
+
+      const fallbackBriefing = `### Daily Briefing · ${city}
+**Generated**: ${nowStr}
+
+### Today's Schedule & Priority Actions
+${activeTasks || "- Clear schedule today. Add a task or reminder anytime."}
+
+### Recent Notes
+${recentNotes || "- No recent notes saved."}
+
+### Suggested Actions
+- Review unread messages or prepare outgoing drafts in Phone Actions
+- Start a 5-minute focus check-in when ready`;
+
+      res.json({
+        briefing: fallbackBriefing,
+        sources: [],
+        modelUsed: isOffline ? "On-Device Lite" : "Local Fallback",
+        generatedAt: new Date().toISOString()
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error?.message || "Failed to generate daily briefing" });
+    }
+  });
+
+  app.post("/api/phone/dispatch-briefing", async (req, res) => {
+    try {
+      const {
+        channelType = "web_push",
+        webhookUrl = "",
+        telegramBotToken = "",
+        telegramChatId = "",
+        title = "DiptiK AI 3 · Daily Briefing",
+        message = ""
+      } = req.body || {};
+
+      if (!message.trim()) {
+        return res.status(400).json({ error: "Briefing content cannot be empty." });
+      }
+
+      const safeValidateHttpsUrl = (rawUrl: string): URL => {
+        const parsed = new URL(rawUrl.trim());
+        if (parsed.protocol !== "https:") {
+          throw new Error("Webhook URL must use https://");
+        }
+        const host = parsed.hostname.toLowerCase();
+        if (
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host === "0.0.0.0" ||
+          host.startsWith("10.") ||
+          host.startsWith("192.168.") ||
+          host.startsWith("169.254.")
+        ) {
+          throw new Error("Private or local network webhook URLs are not allowed.");
+        }
+        return parsed;
+      };
+
+      if (channelType === "telegram") {
+        if (!telegramBotToken.trim() || !telegramChatId.trim()) {
+          return res.status(400).json({ error: "Telegram Bot Token and Chat ID are required." });
+        }
+        const tgRes = await fetch(
+          `https://api.telegram.org/bot${encodeURIComponent(telegramBotToken.trim())}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: telegramChatId.trim(),
+              text: `*${title}*\n\n${message.slice(0, 3800)}`,
+              parse_mode: "Markdown"
+            })
+          }
+        );
+        const tgData = await tgRes.json().catch(() => ({}));
+        if (!tgRes.ok || !tgData?.ok) {
+          return res.status(400).json({
+            error: tgData?.description || `Telegram API returned HTTP ${tgRes.status}`
+          });
+        }
+        return res.json({
+          delivered: true,
+          channel: "Telegram Bot",
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (channelType === "discord") {
+        const url = safeValidateHttpsUrl(webhookUrl);
+        const discordRes = await fetch(url.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: "DiptiK AI 3",
+            content: `**${title}**\n${message.slice(0, 1900)}`
+          })
+        });
+        if (!discordRes.ok) {
+          return res.status(400).json({ error: `Discord webhook returned HTTP ${discordRes.status}` });
+        }
+        return res.json({
+          delivered: true,
+          channel: "Discord Webhook",
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      if (channelType === "custom_webhook") {
+        const url = safeValidateHttpsUrl(webhookUrl);
+        const hookRes = await fetch(url.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: "DiptiK AI 3",
+            title,
+            message,
+            timestamp: new Date().toISOString()
+          })
+        });
+        if (!hookRes.ok) {
+          return res.status(400).json({ error: `Webhook returned HTTP ${hookRes.status}` });
+        }
+        return res.json({
+          delivered: true,
+          channel: "Custom HTTPS Webhook",
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      return res.json({
+        delivered: true,
+        channel: "Browser / PWA Notification",
+        payload: { title, body: message.slice(0, 260) },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error: any) {
+      res.status(400).json({ error: error?.message || "Failed to dispatch briefing" });
+    }
+  });
+
   app.post("/api/action/simulate", (req, res) => {
-    const { actionType, target } = req.body;
+    const { actionType, target, params } = req.body || {};
+    const details = params?.details ? ` · ${params.details}` : "";
+    const verificationLabel = params?.verificationMethod === "webauthn"
+      ? "Device biometric passkey verified."
+      : params?.verificationMethod === "hold_confirm"
+      ? "Explicit Hold-to-Confirm safeguard verified."
+      : "User approval verified.";
     res.json({
       status: "success",
       actionType,
       target,
-      executionLog: `[Android System Intent] Executed action: ${actionType} -> Target: ${target}. Verified user permission level. Data updated successfully on local device storage.`,
+      executionLog: `Executed "${actionType}" for ${target}${details}. ${verificationLabel} Activity log updated.`,
       timestamp: new Date().toLocaleTimeString(),
       undoSupported: actionType !== "send_sms" && actionType !== "make_call"
     });
   });
 
   // 9. Real-Time Voice Agent WebSocket (Gemini Live API)
-  const wss = new WebSocketServer({ server, path: "/api/live" });
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (request, socket, head) => {
+    const pathname = new URL(request.url || "/", "http://localhost").pathname;
+    if (pathname === "/api/live") {
+      wss.handleUpgrade(request, socket, head, ws => {
+        wss.emit("connection", ws, request);
+      });
+    }
+  });
 
   const liveTools: FunctionDeclaration[] = [
     {
@@ -940,16 +1152,22 @@ Include:
             agentGoal = "Help the user in real-time voice conversation.",
             agentInstructions = "",
             voiceName = "Zephyr",
+            voiceAccent = "en-GB",
             engine = "Gemini"
           } = msg.config || {};
 
           const validVoices = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir"];
           const selectedVoice = validVoices.includes(voiceName) ? voiceName : "Zephyr";
+          const isUKAccent = voiceAccent !== "en-US";
+          const accentInstruction = isUKAccent
+            ? "Speech Accent & Dialect: Speak strictly in a natural, refined British English (UK) accent with authentic Southern British / Received Pronunciation cadence, natural British intonation, and UK vocabulary and spelling (e.g., 'schedule' as 'shed-yool', 'organise', 'colour', 'mobile', 'diary'). Maintain this UK English accent consistently throughout the entire spoken conversation."
+            : "Speech Accent & Dialect: Speak in a natural, clear American English (US) accent and standard North American phrasing.";
 
-          const systemInstruction = `You are ${agentName}, a real-time voice AI assistant inside DiptiK AI.
+          const systemInstruction = `You are ${agentName}, a real-time voice AI assistant inside DiptiK AI 3.
 You are speaking directly with ${nickname}.
 Persona: ${persona}.
 Agent Goal: ${agentGoal}.
+${accentInstruction}
 ${agentInstructions ? `Agent Instructions: ${agentInstructions}` : ""}
 ${customInstructions ? `User Custom Instructions: ${customInstructions}` : ""}
 ${getEngineSystemNote(engine)}
@@ -1064,8 +1282,29 @@ Keep your spoken responses natural, conversational, warm, and concise (1-3 sente
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const hmrDisabled = process.env.DISABLE_HMR === "true";
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: hmrDisabled ? false : { server },
+        ...(hmrDisabled ? { ws: false } : {})
+      },
+      plugins: hmrDisabled
+        ? [
+            {
+              name: "disable-hmr-client-ws",
+              enforce: "post",
+              transform(code, id) {
+                if (id.replace(/\\/g, "/").endsWith("/vite/dist/client/client.mjs")) {
+                  return code.replace(
+                    "transport.connect(createHMRHandler(handleMessage));",
+                    "transport.send = async () => {}; transport.invoke = async () => {};"
+                  );
+                }
+              }
+            }
+          ]
+        : [],
       appType: "spa"
     });
     app.use(vite.middlewares);

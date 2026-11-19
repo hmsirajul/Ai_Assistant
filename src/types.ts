@@ -13,6 +13,8 @@ export interface PhoneAction {
   target: string;
   app: string;
   details: string;
+  intentUri?: string;
+  verificationMethod?: "webauthn" | "hold_confirm";
   params?: Record<string, any>;
 }
 
@@ -235,6 +237,8 @@ export interface UserProfile {
   customInstructions?: string;
   theme?: "light" | "dark" | "system";
   wakeWordEnabled?: boolean;
+  handle?: string;
+  ageRange?: string;
 }
 
 export interface PermissionItem {
@@ -254,4 +258,40 @@ export interface OfflineModelPackage {
   description: string;
   status: "downloaded" | "available" | "downloading";
   progress?: number;
+}
+
+export interface NotebookItem {
+  id: string;
+  title: string;
+  description: string;
+  content: string;
+  tags: string[];
+  updatedAt: string;
+  pinned?: boolean;
+}
+
+export type WorkspaceView =
+  | "chat"
+  | "library"
+  | "images"
+  | "scheduled"
+  | "customize"
+  | "videos"
+  | "notebook"
+  | "all-notebooks";
+
+export type ComposerTier = "Auto" | "Fast" | "Pro" | "Offline";
+
+export type PhonePushChannelType = "web_push" | "telegram" | "discord" | "custom_webhook";
+
+export interface PhoneBridgeConfig {
+  channelType: PhonePushChannelType;
+  webhookUrl: string;
+  telegramBotToken: string;
+  telegramChatId: string;
+  dailyBriefingTime: string;
+  autoBriefingEnabled: boolean;
+  city: string;
+  biometricCredentialId?: string;
+  lastBriefingSentAt?: string;
 }

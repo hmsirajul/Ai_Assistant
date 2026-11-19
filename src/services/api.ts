@@ -336,11 +336,54 @@ export async function simulatePhoneAction(actionType: string, target: string, pa
       status: "success",
       actionType,
       target,
-      executionLog: `[Android System Intent] Executed action: ${actionType} -> Target: ${target}. Verified user permission level. Data updated successfully on local device storage.`,
+      executionLog: `Completed action "${actionType}" for ${target}. Activity log recorded.`,
       timestamp: new Date().toLocaleTimeString(),
       undoSupported: actionType !== "send_sms" && actionType !== "make_call"
     };
   }
+}
+
+export async function generateDailyBriefing(params: {
+  city?: string;
+  tasks?: any[];
+  notes?: any[];
+  userProfile?: Record<string, any>;
+  isOffline?: boolean;
+}): Promise<{
+  briefing: string;
+  sources: { title: string; url: string; credibility: string }[];
+  modelUsed: string;
+  generatedAt: string;
+}> {
+  const res = await fetch("/api/phone/briefing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params)
+  });
+  if (!res.ok) {
+    throw new Error(`Briefing request failed (${res.status})`);
+  }
+  return await res.json();
+}
+
+export async function dispatchBriefingToPhone(params: {
+  channelType: string;
+  webhookUrl?: string;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  title?: string;
+  message: string;
+}): Promise<{ delivered: boolean; channel: string; timestamp: string }> {
+  const res = await fetch("/api/phone/dispatch-briefing", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error || `Failed to dispatch (${res.status})`);
+  }
+  return data;
 }
 
 export async function runAutomationTest(name: string, trigger: string, action: string): Promise<any> {
@@ -348,7 +391,7 @@ export async function runAutomationTest(name: string, trigger: string, action: s
     status: "success",
     name,
     trigger,
-    result: `[Automation Test Run] Rule "${name}" triggered by (${trigger}). Action executed: "${action}". Verified Level 1/2/3 safeguards and updated device state.`,
+    result: `Rule "${name}" (${trigger}) executed: "${action}".`,
     timestamp: new Date().toLocaleTimeString()
   };
 }

@@ -40,16 +40,16 @@ export class ErrorBoundary extends React.Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-white rounded-3xl p-6 border border-red-200 shadow-xl text-center space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-red-50 text-[#E31B23] flex items-center justify-center mx-auto">
+        <div className="min-h-screen bg-[#0b0d14] flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-[#121520] rounded-2xl p-6 border border-[#FF1744]/35 shadow-2xl text-center space-y-4 text-[#e2e8f0]">
+            <div className="w-12 h-12 rounded-2xl bg-[#FF1744]/15 border border-[#FF1744]/35 text-[#FF8A9E] flex items-center justify-center mx-auto">
               <AlertTriangle className="w-6 h-6" />
             </div>
-            <h2 className="text-lg font-extrabold text-gray-900">Something went wrong</h2>
-            <p className="text-xs text-gray-600 leading-relaxed break-words">{friendlyMsg}</p>
+            <h2 className="font-display text-lg font-semibold text-white">Something went wrong</h2>
+            <p className="text-xs text-[#94a3b8] leading-relaxed break-words">{friendlyMsg}</p>
             <button
               onClick={() => window.location.reload()}
-              className="w-full py-3 px-4 bg-[#E31B23] hover:bg-[#BF141B] text-white rounded-2xl text-xs font-bold flex items-center justify-center space-x-2 cursor-pointer"
+              className="w-full py-3 px-4 btn-diptik-primary text-white rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" />
               <span>Reload Application</span>
