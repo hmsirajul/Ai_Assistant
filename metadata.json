@@ -1,0 +1,6 @@
+{
+  "name": "DiptiK AI",
+  "description": "DiptiK AI - Intelligent hybrid mobile assistant with real-time voice & text chat, automated agent workflows, device action control, offline mode, and deep research.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

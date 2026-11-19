@@ -1,0 +1,213 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation Blueprint: UserProfile
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid', 'name', 'nickname', 'email', 'plan', 'style', 'speed', 'defaultEngine', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'name', 'nickname', 'email', 'phone', 'country', 'language',
+          'plan', 'avatar', 'style', 'speed', 'wakePhrase', 'wakePhraseWord',
+          'appLock', 'biometric', 'persona', 'defaultEngine', 'authProvider',
+          'voiceName', 'customInstructions', 'theme', 'wakeWordEnabled',
+          'createdAt', 'updatedAt'
+        ])
+        && data.uid is string && isValidId(data.uid) && data.uid == userId && data.uid == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.nickname is string && data.nickname.size() >= 1 && data.nickname.size() <= 50
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 30))
+        && (!('country' in data) || (data.country is string && data.country.size() <= 60))
+        && (!('language' in data) || (data.language is string && data.language.size() <= 40))
+        && data.plan in ['Free Lite', 'Pro AI Agent', 'Enterprise']
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500))
+        && data.style in ['Concise', 'Balanced', 'Detailed', 'Professional', 'Friendly']
+        && data.speed in ['0.8x', '1.0x', '1.2x', '1.5x']
+        && (!('wakePhrase' in data) || data.wakePhrase is bool)
+        && (!('wakePhraseWord' in data) || (data.wakePhraseWord is string && data.wakePhraseWord.size() <= 40))
+        && (!('appLock' in data) || data.appLock is bool)
+        && (!('biometric' in data) || data.biometric is bool)
+        && (!('persona' in data) || (data.persona is string && data.persona.size() <= 120))
+        && data.defaultEngine is string && data.defaultEngine.size() >= 1 && data.defaultEngine.size() <= 80
+        && (!('authProvider' in data) || (data.authProvider is string && data.authProvider.size() <= 40))
+        && (!('voiceName' in data) || data.voiceName in ['Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir'])
+        && (!('customInstructions' in data) || (data.customInstructions is string && data.customInstructions.size() <= 1000))
+        && (!('theme' in data) || data.theme in ['light', 'dark', 'system'])
+        && (!('wakeWordEnabled' in data) || data.wakeWordEnabled is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: CustomAgent
+    function isValidCustomAgent(data) {
+      return data.keys().hasAll([
+          'ownerId', 'name', 'description', 'goal', 'tools', 'memory', 'category', 'instructions', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'icon', 'description', 'goal', 'tools', 'memory', 'category', 'instructions', 'voiceName', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && (!('icon' in data) || (data.icon is string && data.icon.size() <= 40))
+        && data.description is string && data.description.size() <= 300
+        && data.goal is string && data.goal.size() <= 300
+        && data.tools is list && data.tools.size() <= 10
+        && (data.tools.size() == 0 || (data.tools[0] is string && data.tools[0].size() <= 60))
+        && data.memory is string && data.memory.size() <= 150
+        && data.category in ['Productivity', 'Research', 'Communication', 'Lifestyle', 'Developer', 'Business']
+        && data.instructions is string && data.instructions.size() <= 1000
+        && (!('voiceName' in data) || data.voiceName in ['Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir'])
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: UserMemory
+    function isValidUserMemory(data) {
+      return data.keys().hasAll([
+          'ownerId', 'category', 'title', 'value', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'category', 'title', 'value', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 40
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.value is string && data.value.size() >= 1 && data.value.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Collection: /users/{userId}
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'nickname', 'email', 'phone', 'country', 'language',
+          'plan', 'avatar', 'style', 'speed', 'wakePhrase', 'wakePhraseWord',
+          'appLock', 'biometric', 'persona', 'defaultEngine', 'authProvider',
+          'voiceName', 'customInstructions', 'theme', 'wakeWordEnabled', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+
+      // Subcollection: /users/{userId}/agents/{agentId}
+      match /agents/{agentId} {
+        allow get: if isValidId(userId) && isValidId(agentId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(agentId)
+          && isOwner(userId)
+          && isValidCustomAgent(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(agentId)
+          && isOwner(userId)
+          && isValidCustomAgent(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'icon', 'description', 'goal', 'tools', 'memory', 'category', 'instructions', 'voiceName', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(agentId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/memories/{memoryId}
+      match /memories/{memoryId} {
+        allow get: if isValidId(userId) && isValidId(memoryId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(memoryId)
+          && isOwner(userId)
+          && isValidUserMemory(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(memoryId)
+          && isOwner(userId)
+          && isValidUserMemory(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'category', 'title', 'value', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(memoryId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+    }
+  }
+}

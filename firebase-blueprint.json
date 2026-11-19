@@ -1,0 +1,244 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user identity, AI assistant persona, preferred AI engine, and voice preferences.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "nickname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["Free Lite", "Pro AI Agent", "Enterprise"]
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "style": {
+          "type": "string",
+          "enum": ["Concise", "Balanced", "Detailed", "Professional", "Friendly"]
+        },
+        "speed": {
+          "type": "string",
+          "enum": ["0.8x", "1.0x", "1.2x", "1.5x"]
+        },
+        "wakePhrase": {
+          "type": "boolean"
+        },
+        "wakePhraseWord": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "appLock": {
+          "type": "boolean"
+        },
+        "biometric": {
+          "type": "boolean"
+        },
+        "persona": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "defaultEngine": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "authProvider": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "voiceName": {
+          "type": "string",
+          "enum": ["Zephyr", "Puck", "Charon", "Kore", "Fenrir"]
+        },
+        "customInstructions": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark", "system"]
+        },
+        "wakeWordEnabled": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "name",
+        "nickname",
+        "email",
+        "plan",
+        "style",
+        "speed",
+        "defaultEngine",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CustomAgent": {
+      "title": "CustomAgent",
+      "description": "User-created custom AI agent template with tools, memory mode, voice persona, and system instructions.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "icon": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "goal": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "tools": {
+          "type": "array",
+          "description": "Bounded list of up to 10 tool names"
+        },
+        "memory": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Productivity", "Research", "Communication", "Lifestyle", "Developer", "Business"]
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "voiceName": {
+          "type": "string",
+          "enum": ["Zephyr", "Puck", "Charon", "Kore", "Fenrir"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "description",
+        "goal",
+        "tools",
+        "memory",
+        "category",
+        "instructions",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserMemory": {
+      "title": "UserMemory",
+      "description": "Personal long-term memory fact stored for the user's AI assistant.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "category",
+        "title",
+        "value",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile and assistant preferences document owned by userId."
+    },
+    "/users/{userId}/agents/{agentId}": {
+      "schema": { "$ref": "#/entities/CustomAgent" },
+      "description": "Custom AI agents created by userId."
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": { "$ref": "#/entities/UserMemory" },
+      "description": "Personal memory facts owned by userId."
+    }
+  }
+}
