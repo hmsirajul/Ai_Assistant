@@ -24,7 +24,6 @@ import {
   initialUserProfile,
   initialPermissions,
   initialOfflinePackages,
-  initialConversations,
   initialAgentTemplates,
   initialAutomations,
   initialSkills,
@@ -68,6 +67,24 @@ const LOCAL_PROFILE_KEY = "diptik_active_profile_v1";
 const LOCAL_SAVED_PROFILES_KEY = "diptik_saved_profiles_v1";
 const LOCAL_AUTH_CHOSEN_KEY = "diptik_auth_chosen_v1";
 const LOCAL_CUSTOM_AGENTS_KEY = "diptik_custom_agents_v1";
+const LOCAL_CONVERSATIONS_PREFIX = "diptik_conversations_v1_";
+
+function getProfileStorageKey(profile: { uid?: string; email?: string; name?: string }): string {
+  const raw = profile.uid || profile.email || profile.name || "default";
+  return `${LOCAL_CONVERSATIONS_PREFIX}${raw.toLowerCase().replace(/[^a-z0-9@._-]/g, "_")}`;
+}
+
+function loadConversationsForProfile(profile: { uid?: string; email?: string; name?: string }): ChatConversation[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(getProfileStorageKey(profile));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
 
 function sanitizeForBlueprint(profile: UserProfile, uid: string) {
   const validPlans = ["Free Lite", "Pro AI Agent", "Enterprise"];
@@ -174,7 +191,7 @@ interface AppContextType {
     text: string,
     mode?: AIMode,
     attachment?: any,
-    options?: { webAccess?: boolean; signal?: AbortSignal }
+    options?: { webAccess?: boolean; signal?: AbortSignal; newConversation?: boolean }
   ) => Promise<void>;
   deleteConversation: (id: string) => void;
   togglePinConversation: (id: string) => void;
@@ -324,8 +341,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [permissions, setPermissions] = useState<PermissionItem[]>(initialPermissions);
   const [offlinePackages, setOfflinePackages] = useState<OfflineModelPackage[]>(initialOfflinePackages);
-  const [conversations, setConversations] = useState<ChatConversation[]>(initialConversations);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>("conv_1");
+  const [conversations, setConversations] = useState<ChatConversation[]>(() =>
+    loadConversationsForProfile(userProfile)
+  );
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeChatAgent, setActiveChatAgent] = useState<AgentTemplate | null>(null);
 
   const [customAgents, setCustomAgents] = useState<AgentTemplate[]>(() => {
@@ -391,6 +410,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [savedLocalProfiles]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const persistable = conversations
+          .filter(c => !c.isTemporary)
+          .map(c => ({
+            ...c,
+            messages: c.messages.map(m => ({ ...m, isStreaming: false, statusText: undefined }))
+          }));
+        localStorage.setItem(getProfileStorageKey(userProfile), JSON.stringify(persistable));
+      } catch {}
+    }
+  }, [conversations, userProfile]);
+
   // Listen to Firebase Auth state & attach Firestore listeners when signed in and verified
   useEffect(() => {
     const cleanupListeners = () => {
@@ -405,6 +438,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (user) {
         setIsAuthenticated(true);
+        setConversations(loadConversationsForProfile({ uid: user.uid, email: user.email || undefined }));
+        setActiveConversationId(null);
         const userDocPath = `users/${user.uid}`;
         const userRef = doc(db, "users", user.uid);
 
@@ -546,6 +581,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       authProvider: "google"
     };
     setUserProfile(profile);
+    setConversations(loadConversationsForProfile(profile));
+    setActiveConversationId(null);
     setIsAuthenticated(true);
     setShowAuth(false);
     setShowOnboarding(false);
@@ -562,6 +599,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== "undefined") {
       localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "email");
     }
+    const emailProf: UserProfile = {
+      ...userProfile,
+      uid: cred.user.uid,
+      name: cred.user.displayName || email.split("@")[0] || userProfile.name,
+      nickname: (cred.user.displayName?.split(" ")[0] || email.split("@")[0] || userProfile.nickname),
+      email: cred.user.email || email,
+      authProvider: "email"
+    };
+    setUserProfile(emailProf);
+    setConversations(loadConversationsForProfile(emailProf));
+    setActiveConversationId(null);
     setIsAuthenticated(true);
     setShowAuth(false);
     setShowOnboarding(false);
@@ -604,6 +652,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       authProvider: "email"
     };
     setUserProfile(newProf);
+    setConversations([]);
+    setActiveConversationId(null);
     setSavedLocalProfiles(prev => [newProf, ...prev.filter(p => p.email !== newProf.email)]);
     if (typeof window !== "undefined") {
       localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "email");
@@ -629,6 +679,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setUserProfile(profile);
+    setConversations(loadConversationsForProfile(profile));
+    setActiveConversationId(null);
     setSavedLocalProfiles(prev => [
       profile,
       ...prev.filter(p => p.email !== profile.email && p.name !== profile.name)
@@ -666,6 +718,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : "Explorer"
     };
     setUserProfile(preset);
+    setConversations(loadConversationsForProfile(preset));
+    setActiveConversationId(null);
     if (typeof window !== "undefined") {
       localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "default");
     }
@@ -682,6 +736,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const switchLocalProfile = (profile: UserProfile) => {
     setUserProfile(profile);
+    setConversations(loadConversationsForProfile(profile));
+    setActiveConversationId(null);
     setIsOfflineMode((profile.defaultEngine || "").includes("Offline"));
     if (typeof window !== "undefined") {
       localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "profile");
@@ -708,6 +764,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setIsAuthenticated(false);
     setUserProfile(initialUserProfile);
+    setConversations([]);
+    setActiveConversationId(null);
     setCustomAgents([]);
     setShowAuth(true);
     addNotification({
@@ -806,27 +864,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const createNewConversation = (mode: AIMode = activeAIMode, title?: string, isTemporary?: boolean) => {
     const newId = `conv_${Date.now()}`;
-    const agentIntro = activeChatAgent
-      ? ` with **${activeChatAgent.name}**`
-      : "";
     const newConv: ChatConversation = {
       id: newId,
       title: title || `${mode} Conversation`,
-      lastMessage: "Conversation started.",
+      lastMessage: "New conversation started",
       updatedAt: "Just now",
       mode: isOfflineMode ? "Offline" : mode,
       isTemporary,
-      messages: [
-        {
-          id: `msg_init_${Date.now()}`,
-          sender: "ai",
-          text: isOfflineMode
-            ? `Hello ${userProfile.nickname}! I am operating in **Offline Mode** using your downloaded Lite 350M model. How can I assist you on your device today?`
-            : `Hello ${userProfile.nickname}! I'm connected via **${userProfile.defaultEngine || "Gemini 4 Hydrogen"}**${agentIntro} in **${mode} Mode**. Ask a question, give a phone command, or switch to live voice anytime!`,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          mode: isOfflineMode ? "Offline" : mode
-        }
-      ]
+      messages: []
     };
     setConversations(prev => [newConv, ...prev]);
     setActiveConversationId(newId);
@@ -837,13 +882,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     text: string,
     mode: AIMode = activeAIMode,
     attachment?: any,
-    options?: { webAccess?: boolean; signal?: AbortSignal }
+    options?: { webAccess?: boolean; signal?: AbortSignal; newConversation?: boolean }
   ) => {
-    let targetConvId = activeConversationId;
-    if (!targetConvId || !conversations.some(c => c.id === targetConvId)) {
-      targetConvId = createNewConversation(mode, text.slice(0, 25) + "...");
-    }
-
     const effectiveMode: AIMode = isOfflineMode ? "Offline" : mode;
     const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -868,27 +908,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       statusText: effectiveMode === "Offline" ? "Processing locally..." : "Connecting in real time..."
     };
 
-    const targetConv = conversations.find(c => c.id === targetConvId);
-    const history = (targetConv?.messages || []).map(m => ({
+    const existingConv = !options?.newConversation && activeConversationId
+      ? conversations.find(c => c.id === activeConversationId)
+      : undefined;
+    let targetConvId = existingConv?.id;
+    const history = (existingConv?.messages || []).map(m => ({
       sender: m.sender,
       text: m.text
     }));
 
-    setConversations(prev =>
-      prev.map(c => {
-        if (c.id === targetConvId) {
-          const newTitle = c.title.includes("Conversation") ? text.slice(0, 28) + (text.length > 28 ? "..." : "") : c.title;
-          return {
-            ...c,
-            title: newTitle,
-            lastMessage: text,
-            updatedAt: "Just now",
-            messages: [...c.messages, userMsg, placeholderAiMsg]
-          };
-        }
-        return c;
-      })
-    );
+    if (!targetConvId) {
+      targetConvId = `conv_${Date.now()}`;
+      const newConv: ChatConversation = {
+        id: targetConvId,
+        title: text.slice(0, 28) + (text.length > 28 ? "..." : ""),
+        lastMessage: text,
+        updatedAt: "Just now",
+        mode: effectiveMode,
+        messages: [userMsg, placeholderAiMsg]
+      };
+      setConversations(prev => [newConv, ...prev]);
+      setActiveConversationId(targetConvId);
+    } else {
+      setConversations(prev =>
+        prev.map(c => {
+          if (c.id === targetConvId) {
+            const newTitle = c.title.includes("Conversation") ? text.slice(0, 28) + (text.length > 28 ? "..." : "") : c.title;
+            return {
+              ...c,
+              title: newTitle,
+              lastMessage: text,
+              updatedAt: "Just now",
+              messages: [...c.messages, userMsg, placeholderAiMsg]
+            };
+          }
+          return c;
+        })
+      );
+    }
+
+    const targetConv = existingConv;
 
     const updateAiMsg = (updater: (m: ChatMessage) => ChatMessage) => {
       setConversations(prev =>

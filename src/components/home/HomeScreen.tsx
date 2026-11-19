@@ -52,15 +52,16 @@ export const HomeScreen: React.FC = () => {
 
   const handleQuickCommand = (cmdText: string, mode: any = "Ask") => {
     setActiveAIMode(mode);
+    setActiveConversationId(null);
     setActiveTab("chat");
-    sendMessage(cmdText, isOfflineMode ? "Offline" : mode);
+    sendMessage(cmdText, isOfflineMode ? "Offline" : mode, undefined, { newConversation: true });
   };
 
   const quickActions = [
-    { label: "Ask AI", icon: Sparkles, color: "bg-[#FFF0F1] text-[#E31B23]", action: () => { setActiveAIMode("Ask"); setActiveTab("chat"); } },
+    { label: "Ask AI", icon: Sparkles, color: "bg-[#FFF0F1] text-[#E31B23]", action: () => { setActiveAIMode("Ask"); setActiveConversationId(null); setActiveTab("chat"); } },
     { label: "Voice Command", icon: Mic, color: "bg-emerald-50 text-emerald-600", action: () => setIsVoiceModalOpen(true) },
     { label: "Research", icon: Search, color: "bg-blue-50 text-blue-600", action: () => setIsResearchModalOpen(true) },
-    { label: "Create Content", icon: PenTool, color: "bg-purple-50 text-purple-600", action: () => { setActiveAIMode("Create"); setActiveTab("chat"); } },
+    { label: "Create Content", icon: PenTool, color: "bg-purple-50 text-purple-600", action: () => { setActiveAIMode("Create"); setActiveConversationId(null); setActiveTab("chat"); } },
     { label: "Scan Document", icon: Scan, color: "bg-amber-50 text-amber-600", action: () => setIsVisionModalOpen(true) },
     { label: "Phone Actions", icon: Globe, color: "bg-indigo-50 text-indigo-600", action: () => setIsPhoneActionsModalOpen(true) }
   ];
@@ -135,7 +136,7 @@ export const HomeScreen: React.FC = () => {
 
         {/* Quick input bar trigger */}
         <div
-          onClick={() => { setActiveAIMode("Ask"); setActiveTab("chat"); }}
+          onClick={() => { setActiveAIMode("Ask"); setActiveConversationId(null); setActiveTab("chat"); }}
           className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-2xl p-3.5 flex items-center justify-between text-gray-400 cursor-pointer transition-all shadow-inner"
         >
           <span className="text-xs font-medium text-gray-500">Ask DiptiK AI a question or give a command...</span>
@@ -198,38 +199,49 @@ export const HomeScreen: React.FC = () => {
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
           <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Recent Conversations</h3>
-          <button onClick={() => setActiveTab("chat")} className="text-xs font-bold text-[#E31B23] hover:underline">
-            View All ({conversations.length})
+          <button onClick={() => { setActiveConversationId(null); setActiveTab("chat"); }} className="text-xs font-bold text-[#E31B23] hover:underline">
+            {conversations.length > 0 ? `New Chat (${conversations.length} saved)` : "Start New Chat"}
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {recentChats.map(conv => (
-            <div
-              key={conv.id}
-              onClick={() => { setActiveConversationId(conv.id); setActiveTab("chat"); }}
-              className="p-4 bg-white hover:bg-gray-50 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all text-left flex flex-col justify-between cursor-pointer space-y-3"
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    conv.mode === "Offline" ? "bg-amber-50 text-amber-800" : "bg-[#FFF0F1] text-[#E31B23]"
-                  }`}>
-                    {conv.mode} Mode
-                  </span>
-                  <span className="text-[10px] text-gray-400">{conv.updatedAt}</span>
+        {recentChats.length === 0 ? (
+          <div
+            onClick={() => { setActiveConversationId(null); setActiveTab("chat"); }}
+            className="p-6 bg-white hover:bg-gray-50 rounded-2xl border border-dashed border-gray-200 text-center cursor-pointer transition-all space-y-2"
+          >
+            <MessageSquare className="w-6 h-6 text-[#E31B23] mx-auto" />
+            <h4 className="text-xs font-bold text-gray-900">Welcome, {userProfile.nickname || "Friend"}! Ready to start?</h4>
+            <p className="text-xs text-gray-500">Tap here to open a fresh welcoming chat window with {userProfile.defaultEngine || "Gemini 4 Hydrogen"}.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {recentChats.map(conv => (
+              <div
+                key={conv.id}
+                onClick={() => { setActiveConversationId(conv.id); setActiveTab("chat"); }}
+                className="p-4 bg-white hover:bg-gray-50 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all text-left flex flex-col justify-between cursor-pointer space-y-3"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      conv.mode === "Offline" ? "bg-amber-50 text-amber-800" : "bg-[#FFF0F1] text-[#E31B23]"
+                    }`}>
+                      {conv.mode} Mode
+                    </span>
+                    <span className="text-[10px] text-gray-400">{conv.updatedAt}</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-gray-900 mt-2 line-clamp-1">{conv.title}</h4>
+                  <p className="text-xs text-gray-600 mt-1 line-clamp-2 leading-relaxed">{conv.lastMessage}</p>
                 </div>
-                <h4 className="text-xs font-bold text-gray-900 mt-2 line-clamp-1">{conv.title}</h4>
-                <p className="text-xs text-gray-600 mt-1 line-clamp-2 leading-relaxed">{conv.lastMessage}</p>
-              </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs font-bold text-[#E31B23]">
-                <span>Continue</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs font-bold text-[#E31B23]">
+                  <span>Continue</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 6. Active Automations Summary (Section 8 & 14) */}
