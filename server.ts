@@ -66,6 +66,10 @@ function getEngineSystemNote(engine?: string): string {
 }
 
 async function startServer() {
+  // Pre-warm Gemini clients eagerly on server boot to eliminate cold-start setup delay
+  getAIClient();
+  getLiveAIClient();
+
   const app = express();
   const PORT = 3000;
   const server = http.createServer(app);
@@ -92,7 +96,7 @@ function detectPhoneAction(message: string) {
   let confirmationLevel = 1;
 
   if (lowerMsg.includes("call ") || lowerMsg.includes("phone ")) {
-    const contact = (message || "").replace(/.*call\s+/i, "").trim() || "Rahim";
+    const contact = (message || "").replace(/.*call\s+/i, "").trim() || "Contact";
     detectedAction = { type: "phone_call", target: contact, app: "Phone / Dialer", details: `Prepare voice call to ${contact}` };
     confirmationLevel = 2;
   } else if (lowerMsg.includes("remind me") || lowerMsg.includes("create reminder") || lowerMsg.includes("alarm") || lowerMsg.includes("timer")) {
@@ -324,6 +328,7 @@ async function generateChatWithRetry(
         model = DEFAULT_MODEL,
         isOffline = false,
         webAccess = true,
+        voiceFast = false,
         userProfile = {},
         activeAgent = null,
         clientDateTime,
@@ -390,7 +395,18 @@ async function generateChatWithRetry(
         { role: "user", parts: [{ text: message }] }
       ];
 
-      const modelsToTry = useSearch
+      const modelsToTry = voiceFast
+        ? useSearch
+          ? [
+              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: true, status: "Searching live web..." },
+              { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: true, status: "Checking live web updates..." },
+              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Answering directly..." }
+            ]
+          : [
+              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Generating response..." },
+              { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: false, status: "Responding..." }
+            ]
+        : useSearch
         ? [
             { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: true, status: "Checking live web updates & thinking..." },
             { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: true, status: "High demand on primary engine — trying fast engine..." },
@@ -778,48 +794,59 @@ Produce a concise, realistic, actionable execution result for this step (3-5 lin
     }
   });
 
-  // 6. Deep Research Mode
+  // 6. Deep Research Mode (Real-Time Web Grounded)
   app.post("/api/research", async (req, res) => {
     const { query, depth = "Standard Research", dateRange = "Past Year", format = "Executive Summary" } = req.body;
     const ai = getAIClient();
 
     if (ai) {
       try {
-        const prompt = `Conduct a detailed mobile AI research report on: "${query}".
+        const prompt = `Current UTC Time: ${new Date().toISOString()}.
+Conduct a real-time, web-grounded mobile AI research report on: "${query}".
 Depth level: ${depth}. Time frame: ${dateRange}. Output format: ${format}.
 Include:
-1. Executive Summary
+1. Executive Summary (with current facts and dates)
 2. 3-4 Key Findings with bullet points
 3. Comparative Analysis & Conflicting Information
 4. Recommended Next Steps for the user.`;
 
-        const resp = await generateWithModelFallback(ai, {
-          contents: prompt
-        });
+        const { response } = await generateChatWithRetry(
+          ai,
+          [{ role: "user", parts: [{ text: prompt }] }],
+          "You are DiptiK AI Deep Research Analyst. Use live Google Search results to provide accurate, up-to-date findings.",
+          true
+        );
+
+        const groundedSources = extractGroundingSources(
+          response.candidates?.[0]?.groundingMetadata?.groundingChunks
+        );
 
         return res.json({
-          report: resp.text,
+          report: response.text || "Research synthesis completed.",
           query,
           depth,
-          sources: [
-            { title: "Global AI Mobile Ecosystem Report 2026", url: "https://ai.google/research/mobile-agents-2026", credibility: "High" },
-            { title: "On-Device LLM & Privacy Benchmarks", url: "https://arxiv.org/abs/2605.device-ai", credibility: "Peer-Reviewed" },
-            { title: "Android App Intents & Automations Standards", url: "https://developer.android.com/ai/intents", credibility: "Official" }
-          ],
+          sources: groundedSources,
           timestamp: new Date().toISOString()
         });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Research API error:", e);
+        return res.status(503).json({
+          error: e?.message || "Failed to run live research",
+          report: `Unable to complete live research right now (${e?.message || "service busy"}). Please try again.`,
+          query,
+          depth,
+          sources: [],
+          timestamp: new Date().toISOString()
+        });
       }
     }
 
-    res.json({
-      report: `### Executive Summary: ${query}\n\nHybrid AI mobile architectures combine local on-device inference with cloud-scale models (${DEFAULT_MODEL}) to balance low latency and deep reasoning.`,
+    res.status(503).json({
+      error: "GEMINI_API_KEY is not configured on the server.",
+      report: "Live Deep Research requires online AI configuration.",
       query,
       depth,
-      sources: [
-        { title: "Mobile AI Agent Architecture Review 2026", url: "https://ai.google/research/mobile-agents", credibility: "High" }
-      ],
+      sources: [],
       timestamp: new Date().toISOString()
     });
   });
@@ -1076,6 +1103,61 @@ ${recentNotes || "- No recent notes saved."}
 
   const liveTools: FunctionDeclaration[] = [
     {
+      name: "search_live_web",
+      description:
+        "Search the live web using Google Search for real-time, up-to-date news, weather, stock/crypto prices, live scores, current events, facts, or any information the user asks you to check or find online.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          query: {
+            type: Type.STRING,
+            description: "The real-time web search query to execute"
+          }
+        },
+        required: ["query"]
+      }
+    },
+    {
+      name: "browse_url",
+      description:
+        "Browse and inspect a specific website URL or link to read its current content and summarize or answer questions about it.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          url: {
+            type: Type.STRING,
+            description: "Full URL starting with https:// or domain name to browse"
+          },
+          focus: {
+            type: Type.STRING,
+            description: "What specific detail or update to check on the page"
+          }
+        },
+        required: ["url"]
+      }
+    },
+    {
+      name: "get_current_datetime",
+      description: "Get the user's exact current live local date, time, timezone, and city.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {}
+      }
+    },
+    {
+      name: "get_workspace_items",
+      description: "Read the signed-in user's current tasks, reminders, notes, and saved memories in their private workspace.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          filter: {
+            type: Type.STRING,
+            description: "Filter by 'tasks', 'notes', 'memories', or 'all'"
+          }
+        }
+      }
+    },
+    {
       name: "create_task",
       description: "Create a reminder or task in the user's DiptiK AI task list.",
       parameters: {
@@ -1115,9 +1197,232 @@ ${recentNotes || "- No recent notes saved."}
     }
   ];
 
+  const liveSearchCache = new Map<
+    string,
+    { answer: string; sources: { title: string; url: string; credibility: string }[]; expiresAt: number }
+  >();
+
+  async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async function runFastVoiceWebSearch(
+    ai: GoogleGenAI,
+    searchQuery: string,
+    sessionContext: { city: string; timezone: string; clientDateTime: string }
+  ) {
+    const cacheKey = `${searchQuery.toLowerCase()}::${sessionContext.city.toLowerCase()}`;
+    const cached = liveSearchCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { answer: cached.answer, sources: cached.sources, cached: true };
+    }
+
+    const prompt = `UTC: ${new Date().toISOString()} | City: ${sessionContext.city || "Global"}.
+Query: "${searchQuery}"
+Give a direct, factual 2-3 sentence live answer with exact current numbers, dates, or headlines for voice playback.`;
+
+    const attempts = [
+      { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL },
+      { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW }
+    ];
+
+    let lastErr: any = null;
+    for (const attempt of attempts) {
+      try {
+        const response = await withTimeout(
+          ai.models.generateContent({
+            model: attempt.model,
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: {
+              systemInstruction: "You are an ultra-fast live web lookup engine for a real-time voice assistant. Reply in 2-3 crisp spoken sentences using Google Search.",
+              thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
+              tools: [{ googleSearch: {} }]
+            }
+          }),
+          7500,
+          "Live web search"
+        );
+        const sources = extractGroundingSources(
+          response.candidates?.[0]?.groundingMetadata?.groundingChunks
+        );
+        const answer = response.text || "No results found.";
+        if (liveSearchCache.size >= 100) {
+          const oldestKey = liveSearchCache.keys().next().value;
+          if (oldestKey) liveSearchCache.delete(oldestKey);
+        }
+        liveSearchCache.set(cacheKey, {
+          answer,
+          sources,
+          expiresAt: Date.now() + 60_000
+        });
+        return { answer, sources, cached: false };
+      } catch (err: any) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("Live web search failed.");
+  }
+
+  async function executeLiveToolCall(
+    name: string,
+    args: Record<string, any>,
+    sessionContext: {
+      city: string;
+      timezone: string;
+      clientDateTime: string;
+      tasks: any[];
+      notes: any[];
+      memories: any[];
+    },
+    safeSend: (payload: Record<string, any>) => void
+  ): Promise<Record<string, any>> {
+    if (name === "search_live_web") {
+      const searchQuery = String(args.query || "").trim();
+      if (!searchQuery) return { error: "Empty search query." };
+      safeSend({
+        type: "toolStatus",
+        tool: "search_live_web",
+        status: `Searching live web: "${searchQuery}"...`
+      });
+      const ai = getAIClient();
+      if (!ai) return { error: "Cloud search unavailable without GEMINI_API_KEY." };
+      try {
+        const { answer, sources } = await runFastVoiceWebSearch(ai, searchQuery, sessionContext);
+        if (sources.length > 0) {
+          safeSend({ type: "liveSources", sources, query: searchQuery });
+        }
+        return {
+          query: searchQuery,
+          liveAnswer: answer,
+          topSources: sources.slice(0, 3).map(s => s.title),
+          retrievedAtUtc: new Date().toISOString()
+        };
+      } catch (err: any) {
+        return { error: err?.message || "Live web search failed." };
+      } finally {
+        safeSend({ type: "toolStatus", status: "" });
+      }
+    }
+
+    if (name === "browse_url") {
+      let targetUrl = String(args.url || "").trim();
+      if (!targetUrl) return { error: "URL is required." };
+      if (!/^https?:\/\//i.test(targetUrl)) {
+        targetUrl = `https://${targetUrl}`;
+      }
+      const focus = String(args.focus || "Summarize key live updates and headlines in 2-3 sentences.");
+      safeSend({
+        type: "toolStatus",
+        tool: "browse_url",
+        status: `Browsing ${targetUrl}...`
+      });
+      const ai = getAIClient();
+      if (!ai) return { error: "Cloud browsing unavailable without GEMINI_API_KEY." };
+      try {
+        let resp;
+        try {
+          resp = await withTimeout(
+            ai.models.generateContent({
+              model: FAST_FALLBACK_MODEL,
+              contents: `Inspect ${targetUrl}. Focus: ${focus}. UTC: ${new Date().toISOString()}. Answer concisely in 2-3 sentences for voice.`,
+              config: {
+                thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+                tools: [{ urlContext: {} }]
+              }
+            }),
+            7500,
+            "URL browse"
+          );
+        } catch {
+          const fallback = await runFastVoiceWebSearch(ai, `${targetUrl} ${focus}`, sessionContext);
+          const sources = [
+            { title: targetUrl, url: targetUrl, credibility: "Browsed Page" },
+            ...fallback.sources.filter(s => s.url !== targetUrl)
+          ].slice(0, 5);
+          safeSend({ type: "liveSources", sources, query: targetUrl });
+          return {
+            url: targetUrl,
+            pageSummary: fallback.answer,
+            fetchedAtUtc: new Date().toISOString()
+          };
+        }
+        const gSources = extractGroundingSources(
+          resp.candidates?.[0]?.groundingMetadata?.groundingChunks
+        );
+        const sources = [
+          { title: targetUrl, url: targetUrl, credibility: "Browsed Page" },
+          ...gSources.filter(s => s.url !== targetUrl)
+        ].slice(0, 5);
+        safeSend({ type: "liveSources", sources, query: targetUrl });
+        return {
+          url: targetUrl,
+          pageSummary: resp.text || "Page inspected.",
+          fetchedAtUtc: new Date().toISOString()
+        };
+      } catch (err: any) {
+        return { error: err?.message || "Failed to browse URL." };
+      } finally {
+        safeSend({ type: "toolStatus", status: "" });
+      }
+    }
+
+    if (name === "get_current_datetime") {
+      return {
+        serverUtc: new Date().toISOString(),
+        userLocalDateTime: sessionContext.clientDateTime || new Date().toLocaleString(),
+        timezone: sessionContext.timezone || "UTC",
+        city: sessionContext.city || ""
+      };
+    }
+
+    if (name === "get_workspace_items") {
+      const filter = String(args.filter || "all").toLowerCase();
+      return {
+        ...(filter === "all" || filter === "tasks" ? { tasks: sessionContext.tasks.slice(0, 15) } : {}),
+        ...(filter === "all" || filter === "notes" ? { notes: sessionContext.notes.slice(0, 10) } : {}),
+        ...(filter === "all" || filter === "memories" ? { memories: sessionContext.memories.slice(0, 10) } : {})
+      };
+    }
+
+    if (name === "create_task") {
+      sessionContext.tasks.unshift({
+        title: args.title || "Voice Reminder",
+        time: args.time || "5:00 PM",
+        priority: args.priority || "Medium",
+        status: "Today"
+      });
+    } else if (name === "save_note") {
+      sessionContext.notes.unshift({
+        title: args.title || "Voice Note",
+        content: args.content || ""
+      });
+    }
+
+    safeSend({ type: "toolAction", name, args });
+    return { result: `Executed ${name} successfully in DiptiK AI workspace.` };
+  }
+
   wss.on("connection", (clientWs: WebSocket) => {
     let liveSession: any = null;
     let isClosed = false;
+    const sessionContext = {
+      city: "",
+      timezone: "",
+      clientDateTime: "",
+      tasks: [] as any[],
+      notes: [] as any[],
+      memories: [] as any[]
+    };
 
     const safeSend = (payload: Record<string, any>) => {
       if (clientWs.readyState === WebSocket.OPEN) {
@@ -1128,6 +1433,16 @@ ${recentNotes || "- No recent notes saved."}
     clientWs.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
+
+        if (msg.type === "sync_context" && msg.context) {
+          if (Array.isArray(msg.context.tasks)) sessionContext.tasks = msg.context.tasks.slice(0, 20);
+          if (Array.isArray(msg.context.notes)) sessionContext.notes = msg.context.notes.slice(0, 15);
+          if (Array.isArray(msg.context.memories)) sessionContext.memories = msg.context.memories.slice(0, 15);
+          if (msg.context.clientDateTime) sessionContext.clientDateTime = String(msg.context.clientDateTime);
+          if (msg.context.timezone) sessionContext.timezone = String(msg.context.timezone);
+          if (msg.context.city) sessionContext.city = String(msg.context.city);
+          return;
+        }
 
         if (msg.type === "setup") {
           const ai = getLiveAIClient();
@@ -1153,8 +1468,21 @@ ${recentNotes || "- No recent notes saved."}
             agentInstructions = "",
             voiceName = "Zephyr",
             voiceAccent = "en-GB",
-            engine = "Gemini"
+            engine = "Gemini",
+            city = "",
+            timezone = "",
+            clientDateTime = "",
+            tasks = [],
+            notes = [],
+            memories = []
           } = msg.config || {};
+
+          sessionContext.city = String(city || "");
+          sessionContext.timezone = String(timezone || "");
+          sessionContext.clientDateTime = String(clientDateTime || new Date().toLocaleString());
+          sessionContext.tasks = Array.isArray(tasks) ? tasks.slice(0, 20) : [];
+          sessionContext.notes = Array.isArray(notes) ? notes.slice(0, 15) : [];
+          sessionContext.memories = Array.isArray(memories) ? memories.slice(0, 15) : [];
 
           const validVoices = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir"];
           const selectedVoice = validVoices.includes(voiceName) ? voiceName : "Zephyr";
@@ -1163,15 +1491,48 @@ ${recentNotes || "- No recent notes saved."}
             ? "Speech Accent & Dialect: Speak strictly in a natural, refined British English (UK) accent with authentic Southern British / Received Pronunciation cadence, natural British intonation, and UK vocabulary and spelling (e.g., 'schedule' as 'shed-yool', 'organise', 'colour', 'mobile', 'diary'). Maintain this UK English accent consistently throughout the entire spoken conversation."
             : "Speech Accent & Dialect: Speak in a natural, clear American English (US) accent and standard North American phrasing.";
 
-          const systemInstruction = `You are ${agentName}, a real-time voice AI assistant inside DiptiK AI 3.
+          const taskSummary =
+            sessionContext.tasks.length > 0
+              ? sessionContext.tasks
+                  .slice(0, 6)
+                  .map((t: any) => `- ${t.title} (${t.time || "Anytime"}, ${t.status || "Today"})`)
+                  .join("\n")
+              : "No pending tasks.";
+
+          const memorySummary =
+            sessionContext.memories.length > 0
+              ? sessionContext.memories
+                  .slice(0, 6)
+                  .map((m: any) => `- ${m.title}: ${m.value}`)
+                  .join("\n")
+              : "No saved memories.";
+
+          const systemInstruction = `You are ${agentName}, a real-time, live-connected voice AI assistant inside DiptiK AI 3.
 You are speaking directly with ${nickname}.
+Live Context:
+- User Local Date & Time: ${sessionContext.clientDateTime}${sessionContext.timezone ? ` (${sessionContext.timezone})` : ""}
+- Server UTC Time: ${new Date().toISOString()}
+- Location / City: ${sessionContext.city || "Not specified"}
 Persona: ${persona}.
 Agent Goal: ${agentGoal}.
 ${accentInstruction}
 ${agentInstructions ? `Agent Instructions: ${agentInstructions}` : ""}
 ${customInstructions ? `User Custom Instructions: ${customInstructions}` : ""}
 ${getEngineSystemNote(engine)}
-Keep your spoken responses natural, conversational, warm, and concise (1-3 sentences unless asked for detail) since the user is listening in real time. You can also use your tools to create tasks, save notes, or prepare phone actions when asked.`;
+
+User's Private Workspace Snapshot:
+Tasks:
+${taskSummary}
+Memories:
+${memorySummary}
+
+CRITICAL REAL-TIME RULES:
+- Never give static, outdated, or guessed answers for current facts, news, weather, prices, sports, exchange rates, schedules, or anything after your knowledge cutoff.
+- Whenever the user asks you to check, look up, search, find, or browse something online—or asks about current events, today's updates, weather, or live information—ALWAYS call \`search_live_web\` immediately and report the live findings.
+- Whenever the user mentions a website or URL to inspect, call \`browse_url\`.
+- Whenever asked about the current time or date, call \`get_current_datetime\` or state the live time accurately.
+- Whenever asked about their tasks, reminders, or notes, call \`get_workspace_items\`, \`create_task\`, or \`save_note\`.
+- Keep your spoken responses natural, conversational, warm, and concise (1-3 sentences unless asked for detail) since the user is listening in real time.`;
 
           liveSession = await ai.live.connect({
             model: LIVE_MODEL,
@@ -1213,24 +1574,32 @@ Keep your spoken responses natural, conversational, warm, and concise (1-3 sente
                   safeSend({ type: "turnComplete" });
                 }
 
-                // Handle live tool calls and forward side effects to the client UI
-                for (const call of message.toolCall?.functionCalls ?? []) {
-                  safeSend({
-                    type: "toolAction",
-                    name: call.name,
-                    args: call.args || {}
-                  });
-                  if (liveSession) {
-                    liveSession.sendToolResponse({
-                      functionResponses: [
-                        {
+                const calls = message.toolCall?.functionCalls ?? [];
+                if (calls.length > 0) {
+                  void (async () => {
+                    const functionResponses = await Promise.all(
+                      calls.map(async call => {
+                        const result = await executeLiveToolCall(
+                          call.name || "",
+                          (call.args || {}) as Record<string, any>,
+                          sessionContext,
+                          safeSend
+                        );
+                        return {
                           id: call.id,
                           name: call.name,
-                          response: { result: `Executed ${call.name} successfully in DiptiK AI workspace.` }
-                        }
-                      ]
-                    });
-                  }
+                          response: result
+                        };
+                      })
+                    );
+                    if (!isClosed && liveSession) {
+                      try {
+                        liveSession.sendToolResponse({ functionResponses });
+                      } catch (e) {
+                        console.error("Failed to send live tool response:", e);
+                      }
+                    }
+                  })();
                 }
               },
               onerror: (err: any) => {

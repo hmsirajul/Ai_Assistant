@@ -25,7 +25,7 @@ export const ErrorTesterModal: React.FC = () => {
       title: "Permission Denied",
       icon: ShieldAlert,
       color: "text-[#FF8A9E] bg-[#FF1744]/15 border-[#FF1744]/35",
-      desc: "Attempted to execute 'Call Rahim' without Phone & Dialer permission granted.",
+      desc: "Attempted to execute 'Call Contact' without Phone & Dialer permission granted.",
       recovery: "Execution halted at safeguard step. Please review safety transparency card.",
       actionLabel: "Grant Phone Permission",
       onAction: () => {
@@ -58,7 +58,7 @@ export const ErrorTesterModal: React.FC = () => {
       title: "Multiple Contacts Found",
       icon: AlertTriangle,
       color: "text-amber-300 bg-amber-500/15 border-amber-500/30",
-      desc: "Found 3 contacts matching 'Rahim': Primary Mobile, WhatsApp, and Work Email.",
+      desc: "Found 3 contacts matching 'Contact': Primary Mobile, WhatsApp, and Work Email.",
       recovery: "Clarification screen triggered asking user to select desired target.",
       actionLabel: "Simulate Clarification",
       onAction: () => addNotification({ title: "Clarification Triggered", message: "Multi-contact selector prompt displayed for target confirmation.", category: "system" })

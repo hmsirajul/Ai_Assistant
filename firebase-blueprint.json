@@ -20,6 +20,14 @@
           "minLength": 1,
           "maxLength": 50
         },
+        "handle": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "ageRange": {
+          "type": "string",
+          "maxLength": 30
+        },
         "email": {
           "type": "string",
           "maxLength": 150
@@ -42,7 +50,7 @@
         },
         "avatar": {
           "type": "string",
-          "maxLength": 500
+          "maxLength": 1000
         },
         "style": {
           "type": "string",
@@ -225,6 +233,305 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Private chat conversation and message thread owned exclusively by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "lastMessage": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "updatedAtLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["Ask", "Act", "Research", "Create", "Offline"]
+        },
+        "isPinned": {
+          "type": "boolean"
+        },
+        "isArchived": {
+          "type": "boolean"
+        },
+        "messages": {
+          "type": "array",
+          "description": "Bounded list of up to 150 chat messages"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "lastMessage",
+        "updatedAtLabel",
+        "mode",
+        "messages",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Notebook": {
+      "title": "Notebook",
+      "description": "Private research notebook document owned by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 25000
+        },
+        "tags": {
+          "type": "array",
+          "description": "Bounded list of up to 10 tags"
+        },
+        "updatedAtLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "description",
+        "content",
+        "tags",
+        "updatedAtLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Private quick note and checklist owned by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 10000
+        },
+        "tags": {
+          "type": "array",
+          "description": "Bounded list of up to 10 tags"
+        },
+        "createdAtLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "updatedAtLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "isPinned": {
+          "type": "boolean"
+        },
+        "checklist": {
+          "type": "array",
+          "description": "Bounded list of up to 50 checklist items"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "content",
+        "tags",
+        "createdAtLabel",
+        "updatedAtLabel",
+        "isPinned",
+        "checklist",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Private user task item owned by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "dueDate": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "time": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["High", "Medium", "Low"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Today", "Upcoming", "Completed"]
+        },
+        "aiSuggestion": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "reminderSet": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "dueDate",
+        "time",
+        "priority",
+        "status",
+        "reminderSet",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Private audit log entry for commands executed by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "command": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "interpretation": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "actionPerformed": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "serviceUsed": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "dataAccessed": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "permissionUsed": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "result": {
+          "type": "string",
+          "enum": ["Success", "Failed", "Cancelled", "Pending Confirmation"]
+        },
+        "timestampLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "confirmationLevel": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "command",
+        "interpretation",
+        "actionPerformed",
+        "serviceUsed",
+        "dataAccessed",
+        "permissionUsed",
+        "result",
+        "timestampLabel",
+        "confirmationLevel",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -239,6 +546,26 @@
     "/users/{userId}/memories/{memoryId}": {
       "schema": { "$ref": "#/entities/UserMemory" },
       "description": "Personal memory facts owned by userId."
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Private chat conversations owned by userId."
+    },
+    "/users/{userId}/notebooks/{notebookId}": {
+      "schema": { "$ref": "#/entities/Notebook" },
+      "description": "Private notebooks owned by userId."
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "Private quick notes owned by userId."
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Private user tasks owned by userId."
+    },
+    "/users/{userId}/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Private command activity audit logs owned by userId."
     }
   }
 }

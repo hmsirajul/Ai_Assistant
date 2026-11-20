@@ -22,9 +22,9 @@ interface TopRightBarProps {
 }
 
 function getInitials(name: string): string {
-  const parts = (name || "MS").trim().split(/\s+/);
+  const parts = (name || "U").trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  return (name || "U").slice(0, 2).toUpperCase();
 }
 
 export const TopRightBar: React.FC<TopRightBarProps> = ({
@@ -50,7 +50,7 @@ export const TopRightBar: React.FC<TopRightBarProps> = ({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const avatarSrc = firebaseUser?.photoURL || userProfile.avatar || "";
-  const displayName = userProfile.name || "MD SIRAJUL ISLAM";
+  const displayName = firebaseUser?.displayName || userProfile.name || "User";
 
   return (
     <header className="w-full px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4 shrink-0 relative z-20">

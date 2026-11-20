@@ -38,7 +38,7 @@ service cloud.firestore {
           'uid', 'name', 'nickname', 'email', 'plan', 'style', 'speed', 'defaultEngine', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'uid', 'name', 'nickname', 'email', 'phone', 'country', 'language',
+          'uid', 'name', 'nickname', 'handle', 'ageRange', 'email', 'phone', 'country', 'language',
           'plan', 'avatar', 'style', 'speed', 'wakePhrase', 'wakePhraseWord',
           'appLock', 'biometric', 'persona', 'defaultEngine', 'authProvider',
           'voiceName', 'customInstructions', 'theme', 'wakeWordEnabled',
@@ -47,12 +47,14 @@ service cloud.firestore {
         && data.uid is string && isValidId(data.uid) && data.uid == userId && data.uid == request.auth.uid
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
         && data.nickname is string && data.nickname.size() >= 1 && data.nickname.size() <= 50
+        && (!('handle' in data) || (data.handle is string && data.handle.size() <= 50))
+        && (!('ageRange' in data) || (data.ageRange is string && data.ageRange.size() <= 30))
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 30))
         && (!('country' in data) || (data.country is string && data.country.size() <= 60))
         && (!('language' in data) || (data.language is string && data.language.size() <= 40))
         && data.plan in ['Free Lite', 'Pro AI Agent', 'Enterprise']
-        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500))
+        && (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 1000))
         && data.style in ['Concise', 'Balanced', 'Detailed', 'Professional', 'Friendly']
         && data.speed in ['0.8x', '1.0x', '1.2x', '1.5x']
         && (!('wakePhrase' in data) || data.wakePhrase is bool)
@@ -109,6 +111,111 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    // Validation Blueprint: Conversation
+    function isValidConversation(data) {
+      return data.keys().hasAll([
+          'ownerId', 'title', 'lastMessage', 'updatedAtLabel', 'mode', 'messages', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'title', 'lastMessage', 'updatedAtLabel', 'mode', 'isPinned', 'isArchived', 'messages', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.lastMessage is string && data.lastMessage.size() <= 500
+        && data.updatedAtLabel is string && data.updatedAtLabel.size() <= 60
+        && data.mode in ['Ask', 'Act', 'Research', 'Create', 'Offline']
+        && (!('isPinned' in data) || data.isPinned is bool)
+        && (!('isArchived' in data) || data.isArchived is bool)
+        && data.messages is list && data.messages.size() <= 150
+        && (data.messages.size() == 0 || data.messages[0] is map)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Notebook
+    function isValidNotebook(data) {
+      return data.keys().hasAll([
+          'ownerId', 'title', 'description', 'content', 'tags', 'updatedAtLabel', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'title', 'description', 'content', 'tags', 'updatedAtLabel', 'pinned', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 500
+        && data.content is string && data.content.size() <= 25000
+        && data.tags is list && data.tags.size() <= 10
+        && (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() <= 40))
+        && data.updatedAtLabel is string && data.updatedAtLabel.size() <= 60
+        && (!('pinned' in data) || data.pinned is bool)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Note
+    function isValidNote(data) {
+      return data.keys().hasAll([
+          'ownerId', 'title', 'content', 'tags', 'createdAtLabel', 'updatedAtLabel', 'isPinned', 'checklist', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'title', 'content', 'tags', 'createdAtLabel', 'updatedAtLabel', 'isPinned', 'checklist', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.content is string && data.content.size() <= 10000
+        && data.tags is list && data.tags.size() <= 10
+        && (data.tags.size() == 0 || (data.tags[0] is string && data.tags[0].size() <= 40))
+        && data.createdAtLabel is string && data.createdAtLabel.size() <= 60
+        && data.updatedAtLabel is string && data.updatedAtLabel.size() <= 60
+        && data.isPinned is bool
+        && data.checklist is list && data.checklist.size() <= 50
+        && (data.checklist.size() == 0 || data.checklist[0] is map)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Task
+    function isValidTask(data) {
+      return data.keys().hasAll([
+          'ownerId', 'title', 'dueDate', 'time', 'priority', 'status', 'reminderSet', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'title', 'dueDate', 'time', 'priority', 'status', 'aiSuggestion', 'reminderSet', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.dueDate is string && data.dueDate.size() <= 60
+        && data.time is string && data.time.size() <= 40
+        && data.priority in ['High', 'Medium', 'Low']
+        && data.status in ['Today', 'Upcoming', 'Completed']
+        && (!('aiSuggestion' in data) || (data.aiSuggestion is string && data.aiSuggestion.size() <= 500))
+        && data.reminderSet is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: ActivityLog
+    function isValidActivityLog(data) {
+      return data.keys().hasAll([
+          'ownerId', 'command', 'interpretation', 'actionPerformed', 'serviceUsed', 'dataAccessed', 'permissionUsed', 'result', 'timestampLabel', 'confirmationLevel', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'command', 'interpretation', 'actionPerformed', 'serviceUsed', 'dataAccessed', 'permissionUsed', 'result', 'timestampLabel', 'confirmationLevel', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.command is string && data.command.size() <= 300
+        && data.interpretation is string && data.interpretation.size() <= 500
+        && data.actionPerformed is string && data.actionPerformed.size() <= 500
+        && data.serviceUsed is string && data.serviceUsed.size() <= 120
+        && data.dataAccessed is string && data.dataAccessed.size() <= 150
+        && data.permissionUsed is string && data.permissionUsed.size() <= 120
+        && data.result in ['Success', 'Failed', 'Cancelled', 'Pending Confirmation']
+        && data.timestampLabel is string && data.timestampLabel.size() <= 60
+        && data.confirmationLevel is int && data.confirmationLevel >= 1 && data.confirmationLevel <= 3
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Collection: /users/{userId}
     match /users/{userId} {
       allow get: if isValidId(userId) && isOwner(userId);
@@ -129,13 +236,15 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
-          'name', 'nickname', 'email', 'phone', 'country', 'language',
+          'name', 'nickname', 'handle', 'ageRange', 'email', 'phone', 'country', 'language',
           'plan', 'avatar', 'style', 'speed', 'wakePhrase', 'wakePhraseWord',
           'appLock', 'biometric', 'persona', 'defaultEngine', 'authProvider',
           'voiceName', 'customInstructions', 'theme', 'wakeWordEnabled', 'updatedAt'
         ]);
 
-      allow delete: if false;
+      allow delete: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId);
 
       // Subcollection: /users/{userId}/agents/{agentId}
       match /agents/{agentId} {
@@ -204,6 +313,175 @@ service cloud.firestore {
         allow delete: if isVerifiedUser()
           && isValidId(userId)
           && isValidId(memoryId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/conversations/{conversationId}
+      match /conversations/{conversationId} {
+        allow get: if isValidId(userId) && isValidId(conversationId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(conversationId)
+          && isOwner(userId)
+          && isValidConversation(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(conversationId)
+          && isOwner(userId)
+          && isValidConversation(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'lastMessage', 'updatedAtLabel', 'mode', 'isPinned', 'isArchived', 'messages', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(conversationId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/notebooks/{notebookId}
+      match /notebooks/{notebookId} {
+        allow get: if isValidId(userId) && isValidId(notebookId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(notebookId)
+          && isOwner(userId)
+          && isValidNotebook(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(notebookId)
+          && isOwner(userId)
+          && isValidNotebook(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'content', 'tags', 'updatedAtLabel', 'pinned', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(notebookId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/notes/{noteId}
+      match /notes/{noteId} {
+        allow get: if isValidId(userId) && isValidId(noteId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(noteId)
+          && isOwner(userId)
+          && isValidNote(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(noteId)
+          && isOwner(userId)
+          && isValidNote(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'content', 'tags', 'createdAtLabel', 'updatedAtLabel', 'isPinned', 'checklist', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(noteId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/tasks/{taskId}
+      match /tasks/{taskId} {
+        allow get: if isValidId(userId) && isValidId(taskId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && isOwner(userId)
+          && isValidTask(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && isOwner(userId)
+          && isValidTask(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'dueDate', 'time', 'priority', 'status', 'aiSuggestion', 'reminderSet', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/activityLogs/{logId}
+      match /activityLogs/{logId} {
+        allow get: if isValidId(userId) && isValidId(logId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(logId)
+          && isOwner(userId)
+          && isValidActivityLog(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if false;
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(logId)
           && isOwner(userId)
           && exists(/databases/$(database)/documents/users/$(userId))
           && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;

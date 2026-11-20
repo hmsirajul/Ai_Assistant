@@ -8,6 +8,7 @@ export interface ChatRequest {
   model?: string;
   isOffline?: boolean;
   webAccess?: boolean;
+  voiceFast?: boolean;
   userProfile?: Record<string, any>;
   activeAgent?: AgentTemplate | null;
   clientDateTime?: string;
@@ -63,7 +64,7 @@ function buildLocalFallback(req: ChatRequest): ChatResponse {
     const nowStr = req.clientDateTime || new Date().toLocaleString();
     reply = `[Offline Mode - Local Clock]: Your current local date & time is **${nowStr}**${req.timezone ? ` (${req.timezone})` : ""}.`;
   } else if (lower.includes("call")) {
-    action = { type: "phone_call", target: "Rahim", app: "Phone / Dialer", details: "Prepare outbound voice call to Rahim" };
+    action = { type: "phone_call", target: "Contact", app: "Phone / Dialer", details: "Prepare outbound voice call to Contact" };
     confirmationLevel = 2;
     reply = `[Offline Mode]: Prepared voice call in native dialer for "${req.message}".`;
   } else if (lower.includes("remind") || lower.includes("alarm") || lower.includes("timer")) {

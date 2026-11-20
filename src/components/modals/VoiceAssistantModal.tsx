@@ -9,10 +9,15 @@ import {
   WifiOff,
   RefreshCw,
   PhoneOff,
-  Send
+  Send,
+  Globe,
+  ExternalLink,
+  History,
+  CheckCircle2
 } from "lucide-react";
 import { DiptiKLogo } from "../common/DiptiKLogo";
 import { AgentTemplate, VoicePersonaName } from "../../types";
+import { sendChatMessageStream } from "../../services/api";
 import {
   VOICE_PERSONA_DETAILS,
   VoiceAccent,
@@ -23,6 +28,20 @@ import {
 } from "../../lib/voice";
 
 const VOICES: VoicePersonaName[] = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir"];
+
+interface VoiceSource {
+  title: string;
+  url: string;
+  credibility: string;
+}
+
+interface VoiceTurn {
+  id: string;
+  userText: string;
+  agentText: string;
+  sources?: VoiceSource[];
+  timestamp: string;
+}
 
 function floatTo16BitPcmBase64(float32Array: Float32Array): string {
   const buffer = new ArrayBuffer(float32Array.length * 2);
@@ -54,6 +73,13 @@ function base64PcmToFloat32(base64: string): Float32Array {
   return float32;
 }
 
+function getSpeechRate(speed?: string): number {
+  if (speed === "0.8x") return 0.85;
+  if (speed === "1.2x") return 1.2;
+  if (speed === "1.5x") return 1.45;
+  return 1.0;
+}
+
 export const VoiceAssistantModal: React.FC = () => {
   const {
     isVoiceModalOpen,
@@ -65,12 +91,18 @@ export const VoiceAssistantModal: React.FC = () => {
     agentTemplates,
     voiceAgent,
     setVoiceAgent,
-    sendMessage,
+    recordVoiceExchange,
+    tasks,
+    notes,
+    memoryItems,
+    phoneBridgeConfig,
     addTask,
     addNote,
     addNotification,
     addActivityLog,
-    setActiveCommandConfirmation
+    setActiveCommandConfirmation,
+    setActiveWorkspaceView,
+    setActiveConversationId
   } = useApp();
 
   const [connectionState, setConnectionState] = useState<
@@ -82,11 +114,14 @@ export const VoiceAssistantModal: React.FC = () => {
   const [voiceAccent, setVoiceAccent] = useState<VoiceAccent>(() => loadVoiceAccent());
   const [userTranscript, setUserTranscript] = useState("");
   const [agentTranscript, setAgentTranscript] = useState("");
+  const [toolStatus, setToolStatus] = useState("");
+  const [liveSources, setLiveSources] = useState<VoiceSource[]>([]);
+  const [sessionTurns, setSessionTurns] = useState<VoiceTurn[]>([]);
+  const [savedConvId, setSavedConvId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [showKeyboard, setShowKeyboard] = useState(false);
   const [inputText, setInputText] = useState("");
-  const [micLevel, setMicLevel] = useState(0);
   const [speakPhase, setSpeakPhase] = useState(0);
 
   // Refs to avoid stale closures inside audio & websocket callbacks
@@ -99,10 +134,25 @@ export const VoiceAssistantModal: React.FC = () => {
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isMutedRef = useRef<boolean>(false);
   const sessionReadyRef = useRef<boolean>(false);
+  const sessionSeqRef = useRef<number>(0);
+  const glowRef = useRef<HTMLDivElement | null>(null);
+
+  // Live voice turn persistence refs
+  const voiceConvIdRef = useRef<string | null>(null);
+  const turnUserRef = useRef<string>("");
+  const turnAgentRef = useRef<string>("");
+  const turnSourcesRef = useRef<VoiceSource[]>([]);
+  const turnSavedRef = useRef<boolean>(false);
+  const sessionTurnsRef = useRef<VoiceTurn[]>([]);
+  const fallbackAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    sessionTurnsRef.current = sessionTurns;
+  }, [sessionTurns]);
 
   useEffect(() => {
     if (voiceAgent?.voiceName) {
@@ -112,6 +162,25 @@ export const VoiceAssistantModal: React.FC = () => {
     }
   }, [voiceAgent, userProfile.voiceName]);
 
+  // Keep server-side voice context synced if tasks/notes/memories update mid-session
+  useEffect(() => {
+    if (sessionReadyRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "sync_context",
+          context: {
+            tasks: tasks.filter(t => t.status !== "Completed").slice(0, 15),
+            notes: notes.slice(0, 10),
+            memories: memoryItems.slice(0, 10),
+            city: phoneBridgeConfig.city || userProfile.country || "",
+            timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "",
+            clientDateTime: new Date().toLocaleString()
+          }
+        })
+      );
+    }
+  }, [tasks, notes, memoryItems, phoneBridgeConfig.city, userProfile.country]);
+
   // Smooth speaking animation tick
   useEffect(() => {
     if (connectionState !== "speaking") return;
@@ -120,6 +189,45 @@ export const VoiceAssistantModal: React.FC = () => {
     }, 90);
     return () => window.clearInterval(id);
   }, [connectionState]);
+
+  const flushCurrentTurnToHistory = (modelLabel = "Gemini 3.8 Live (Voice + Web)") => {
+    if (turnSavedRef.current) return;
+    const uText = turnUserRef.current.trim();
+    const aText = turnAgentRef.current.trim();
+    if (!uText && !aText) return;
+
+    turnSavedRef.current = true;
+    const sourcesSnapshot = [...turnSourcesRef.current];
+    const convId = recordVoiceExchange({
+      conversationId: voiceConvIdRef.current,
+      userText: uText,
+      assistantText: aText,
+      sources: sourcesSnapshot,
+      modelUsed: modelLabel,
+      mode: isOfflineMode ? "Offline" : "Ask"
+    });
+
+    if (convId) {
+      voiceConvIdRef.current = convId;
+      setSavedConvId(convId);
+    }
+
+    const completedTurn: VoiceTurn = {
+      id: `vturn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      userText: uText,
+      agentText: aText,
+      sources: sourcesSnapshot.length > 0 ? sourcesSnapshot : undefined,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    };
+    setSessionTurns(prev => [...prev, completedTurn]);
+  };
+
+  const resetCurrentTurnBuffers = () => {
+    turnUserRef.current = "";
+    turnAgentRef.current = "";
+    turnSourcesRef.current = [];
+    turnSavedRef.current = false;
+  };
 
   const stopAllPlayback = () => {
     stopSpeechSynthesis();
@@ -137,8 +245,16 @@ export const VoiceAssistantModal: React.FC = () => {
   };
 
   const cleanupSession = () => {
+    flushCurrentTurnToHistory();
     sessionReadyRef.current = false;
     stopAllPlayback();
+
+    if (fallbackAbortRef.current) {
+      try {
+        fallbackAbortRef.current.abort();
+      } catch {}
+      fallbackAbortRef.current = null;
+    }
 
     if (processorRef.current) {
       try {
@@ -174,7 +290,10 @@ export const VoiceAssistantModal: React.FC = () => {
       wsRef.current = null;
     }
 
-    setMicLevel(0);
+    setToolStatus("");
+    if (glowRef.current) {
+      glowRef.current.style.transform = "scale(1)";
+    }
   };
 
   const playPcmChunk = (base64Audio: string) => {
@@ -193,7 +312,7 @@ export const VoiceAssistantModal: React.FC = () => {
     source.buffer = buffer;
     source.connect(ctx.destination);
 
-    const startTime = Math.max(ctx.currentTime + 0.02, nextStartTimeRef.current);
+    const startTime = Math.max(ctx.currentTime + 0.005, nextStartTimeRef.current);
     source.start(startTime);
     nextStartTimeRef.current = startTime + buffer.duration;
 
@@ -261,15 +380,19 @@ export const VoiceAssistantModal: React.FC = () => {
     voice: VoicePersonaName,
     accent: VoiceAccent = voiceAccent
   ) => {
+    const seq = ++sessionSeqRef.current;
     cleanupSession();
+    resetCurrentTurnBuffers();
     setErrorMsg("");
     setUserTranscript("");
+    setLiveSources([]);
+    setToolStatus("");
 
     const accentLabel = accent === "en-GB" ? "UK English" : "US English";
     setAgentTranscript(
       isOfflineMode || !liveVoiceCapable
         ? `Offline voice mode (${accentLabel}). Speak or type a prompt below.`
-        : `Connecting ${targetAgent ? targetAgent.name : "DiptiK Voice"} in ${accentLabel}...`
+        : `Connecting ${targetAgent ? targetAgent.name : "DiptiK Live Voice"} (${accentLabel})...`
     );
 
     if (isOfflineMode || !liveVoiceCapable) {
@@ -280,18 +403,8 @@ export const VoiceAssistantModal: React.FC = () => {
     setConnectionState("connecting");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-      streamRef.current = stream;
-
-      const inputCtx = new AudioContext({ sampleRate: 16000 });
+      // Open WebSocket and Output AudioContext immediately in parallel with mic acquisition
       const outputCtx = new AudioContext({ sampleRate: 24000 });
-      inputAudioCtxRef.current = inputCtx;
       outputAudioCtxRef.current = outputCtx;
       nextStartTimeRef.current = outputCtx.currentTime;
 
@@ -299,7 +412,20 @@ export const VoiceAssistantModal: React.FC = () => {
       const ws = new WebSocket(`${protocol}//${window.location.host}/api/live`);
       wsRef.current = ws;
 
+      const clientDateTime = new Date().toLocaleString(undefined, {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      });
+      const timezone =
+        typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "";
+
       ws.onopen = () => {
+        if (seq !== sessionSeqRef.current) return;
         ws.send(
           JSON.stringify({
             type: "setup",
@@ -310,70 +436,127 @@ export const VoiceAssistantModal: React.FC = () => {
               agentName: targetAgent?.name || "DiptiK Voice Agent",
               agentGoal:
                 targetAgent?.goal ||
-                "Assist the user in real-time voice conversation and task automation.",
+                "Assist the user fast in real-time voice with live web search and workspace tasks.",
               agentInstructions: targetAgent?.instructions || "",
               voiceName: voice,
               voiceAccent: accent,
-              engine: userProfile.defaultEngine || "Gemini 4 Hydrogen (Default)"
+              engine: userProfile.defaultEngine || "Gemini 4 Hydrogen (Default)",
+              city: phoneBridgeConfig.city || userProfile.country || "",
+              timezone,
+              clientDateTime,
+              tasks: tasks.filter(t => t.status !== "Completed").slice(0, 10),
+              notes: notes.slice(0, 6),
+              memories: memoryItems.slice(0, 8)
             }
           })
         );
       };
 
       ws.onmessage = event => {
+        if (seq !== sessionSeqRef.current) return;
         const msg = JSON.parse(event.data);
 
         if (msg.type === "ready") {
           sessionReadyRef.current = true;
           setConnectionState("listening");
           setAgentTranscript(
-            `${msg.agentName} (${msg.voiceName} · ${accent === "en-GB" ? "UK" : "US"}) is listening.`
+            `${msg.agentName} (${msg.voiceName} · ${accent === "en-GB" ? "UK" : "US"} · Fast Live Web) is listening.`
           );
         } else if (msg.type === "audio" && msg.audio) {
           setConnectionState("speaking");
           playPcmChunk(msg.audio);
-        } else if (msg.type === "inputTranscript" && msg.text) {
-          setUserTranscript(prev => (prev ? `${prev} ${msg.text}` : msg.text).trim());
-        } else if (msg.type === "outputTranscript" && msg.text) {
-          setAgentTranscript(prev => {
-            const cleanPrev = prev.endsWith("is listening.") ? "" : prev;
-            return `${cleanPrev}${msg.text}`;
+        } else if (msg.type === "toolStatus") {
+          setToolStatus(msg.status || "");
+        } else if (msg.type === "liveSources" && Array.isArray(msg.sources)) {
+          const incoming: VoiceSource[] = msg.sources;
+          const merged = [...turnSourcesRef.current];
+          incoming.forEach(src => {
+            if (src?.url && !merged.some(m => m.url === src.url)) {
+              merged.push(src);
+            }
           });
+          turnSourcesRef.current = merged.slice(0, 8);
+          setLiveSources(turnSourcesRef.current);
+        } else if (msg.type === "inputTranscript" && msg.text) {
+          if (turnAgentRef.current.trim().length > 0) {
+            flushCurrentTurnToHistory();
+            resetCurrentTurnBuffers();
+            setLiveSources([]);
+            setAgentTranscript("");
+          }
+          turnUserRef.current = `${turnUserRef.current} ${msg.text}`.trim();
+          setUserTranscript(turnUserRef.current);
+        } else if (msg.type === "outputTranscript" && msg.text) {
+          turnAgentRef.current = `${turnAgentRef.current}${msg.text}`;
+          setAgentTranscript(turnAgentRef.current);
         } else if (msg.type === "interrupted") {
           stopAllPlayback();
+          flushCurrentTurnToHistory();
+          setToolStatus("");
           setConnectionState("listening");
         } else if (msg.type === "turnComplete") {
+          setToolStatus("");
+          flushCurrentTurnToHistory();
           if (activeSourcesRef.current.size === 0) {
             setConnectionState("listening");
           }
         } else if (msg.type === "toolAction") {
           handleLiveToolAction(msg.name, msg.args || {});
         } else if (msg.type === "error") {
+          setToolStatus("");
           setErrorMsg(msg.message || "Voice connection encountered an error.");
           setConnectionState("error");
         } else if (msg.type === "closed") {
+          setToolStatus("");
           sessionReadyRef.current = false;
         }
       };
 
       ws.onerror = () => {
-        setErrorMsg("WebSocket connection error. Please check your microphone and network.");
+        if (seq !== sessionSeqRef.current) return;
+        setToolStatus("");
+        setErrorMsg("Live audio stream disconnected. You can reconnect or type below for fast live web answers.");
         setConnectionState("error");
       };
 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      if (seq !== sessionSeqRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+      const inputCtx = new AudioContext({ sampleRate: 16000 });
+      inputAudioCtxRef.current = inputCtx;
+
       const source = inputCtx.createMediaStreamSource(stream);
-      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+      // 1024 samples @ 16kHz = 64ms low-latency audio frames (4x faster than 4096)
+      const processor = inputCtx.createScriptProcessor(1024, 1, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = e => {
         const channelData = e.inputBuffer.getChannelData(0);
 
-        let sum = 0;
-        for (let i = 0; i < channelData.length; i += 8) {
-          sum += Math.abs(channelData[i]);
+        if (glowRef.current) {
+          if (isMutedRef.current) {
+            glowRef.current.style.transform = "scale(1)";
+          } else {
+            let sum = 0;
+            for (let i = 0; i < channelData.length; i += 8) {
+              sum += Math.abs(channelData[i]);
+            }
+            const avg = sum / (channelData.length / 8);
+            const lvl = Math.min(1, avg * 8);
+            glowRef.current.style.transform = `scale(${(1 + lvl * 0.16).toFixed(3)})`;
+          }
         }
-        const avg = sum / (channelData.length / 8);
-        setMicLevel(isMutedRef.current ? 0 : Math.min(1, avg * 8));
 
         if (!isMutedRef.current && sessionReadyRef.current && ws.readyState === WebSocket.OPEN) {
           const base64 = floatTo16BitPcmBase64(channelData);
@@ -384,10 +567,11 @@ export const VoiceAssistantModal: React.FC = () => {
       source.connect(processor);
       processor.connect(inputCtx.destination);
     } catch (err: any) {
+      if (seq !== sessionSeqRef.current) return;
       console.error("Failed to start real-time voice:", err);
       setErrorMsg(
         err?.name === "NotAllowedError"
-          ? "Microphone permission was denied. Allow microphone access or use keyboard input below."
+          ? "Microphone permission was denied. Allow mic access or type below to chat with fast live web search."
           : err?.message || "Could not access microphone."
       );
       setConnectionState("error");
@@ -396,6 +580,9 @@ export const VoiceAssistantModal: React.FC = () => {
 
   useEffect(() => {
     if (isVoiceModalOpen) {
+      voiceConvIdRef.current = null;
+      setSavedConvId(null);
+      setSessionTurns([]);
       const currentAccent = loadVoiceAccent();
       setVoiceAccent(currentAccent);
       startLiveSession(voiceAgent, selectedVoice, currentAccent);
@@ -446,21 +633,12 @@ export const VoiceAssistantModal: React.FC = () => {
   const handlePreviewVoice = () => {
     const sample =
       voiceAccent === "en-GB"
-        ? `Hello ${userProfile.nickname || "there"}, DiptiK Voice is active in British English. Everything is sorted and ready whenever you are.`
-        : `Hello ${userProfile.nickname || "there"}, DiptiK Voice is active in American English and ready whenever you are.`;
-
-    const rate =
-      userProfile.speed === "0.8x"
-        ? 0.85
-        : userProfile.speed === "1.2x"
-        ? 1.2
-        : userProfile.speed === "1.5x"
-        ? 1.45
-        : 1.0;
+        ? `Hello ${userProfile.nickname || "there"}, DiptiK Voice is active in British English with live web search connected.`
+        : `Hello ${userProfile.nickname || "there"}, DiptiK Voice is active in American English with live web search connected.`;
 
     speakWithAccent(sample, {
       accent: voiceAccent,
-      rate,
+      rate: getSpeechRate(userProfile.speed),
       onStart: () => setConnectionState("speaking"),
       onEnd: () =>
         setConnectionState(prev =>
@@ -470,60 +648,187 @@ export const VoiceAssistantModal: React.FC = () => {
   };
 
   const handleSendTextCommand = async (text: string) => {
-    if (!text.trim()) return;
-    setUserTranscript(text);
+    const cleanPrompt = text.trim();
+    if (!cleanPrompt) return;
 
+    flushCurrentTurnToHistory();
+    resetCurrentTurnBuffers();
+    turnUserRef.current = cleanPrompt;
+    setUserTranscript(cleanPrompt);
+    setAgentTranscript("");
+    setLiveSources([]);
+
+    // Path A: Active Gemini Live WebSocket session -> model speaks back in real-time & searches live web via tools
     if (sessionReadyRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-      setAgentTranscript("");
-      wsRef.current.send(JSON.stringify({ type: "text", text }));
+      setToolStatus("Sending to live voice engine...");
+      wsRef.current.send(JSON.stringify({ type: "text", text: cleanPrompt }));
       return;
     }
 
-    // Fallback via /api/chat + speechSynthesis in chosen UK/US accent
+    // Path B: Direct Streaming Cloud AI Fallback with Live Google Search + Speech Synthesis + History Persistence
+    if (fallbackAbortRef.current) {
+      try {
+        fallbackAbortRef.current.abort();
+      } catch {}
+    }
+    const controller = new AbortController();
+    fallbackAbortRef.current = controller;
+
+    stopAllPlayback();
     setConnectionState("speaking");
-    await sendMessage(text, isOfflineMode ? "Offline" : "Act");
-    const reply = isOfflineMode
-      ? `Sorted — I have processed "${text}" locally on your device.`
-      : `Sorted — I have handled "${text}" for you.`;
-    setAgentTranscript(reply);
+    setToolStatus(isOfflineMode ? "Running locally..." : "Checking live web updates...");
 
-    const rate =
-      userProfile.speed === "0.8x"
-        ? 0.85
-        : userProfile.speed === "1.2x"
-        ? 1.2
-        : userProfile.speed === "1.5x"
-        ? 1.45
-        : 1.0;
-
-    speakWithAccent(reply, {
-      accent: voiceAccent,
-      rate,
-      onEnd: () => setConnectionState(isOfflineMode ? "offline" : "listening")
+    const history = sessionTurnsRef.current.flatMap(t => {
+      const items: { sender: "user" | "ai"; text: string }[] = [];
+      if (t.userText) items.push({ sender: "user", text: t.userText });
+      if (t.agentText) items.push({ sender: "ai", text: t.agentText });
+      return items;
     });
+
+    const clientDateTime = new Date().toLocaleString(undefined, {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+    const timezone =
+      typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "";
+
+    let accumulated = "";
+    let spokenIndex = 0;
+    let speechStarted = false;
+    const rate = getSpeechRate(userProfile.speed);
+
+    const flushSpeechQueue = (flushRemaining = false) => {
+      const unspoken = accumulated.slice(spokenIndex);
+      if (!unspoken) return;
+      if (flushRemaining) {
+        if (unspoken.trim()) {
+          speakWithAccent(unspoken.trim(), {
+            accent: voiceAccent,
+            rate,
+            queue: speechStarted,
+            onEnd: () =>
+              setConnectionState(isOfflineMode || !liveVoiceCapable ? "offline" : "listening")
+          });
+          spokenIndex = accumulated.length;
+          speechStarted = true;
+        } else {
+          setConnectionState(isOfflineMode || !liveVoiceCapable ? "offline" : "listening");
+        }
+        return;
+      }
+
+      // Speak each finished sentence as soon as punctuation arrives
+      const match = unspoken.match(/^([\s\S]*?[.!?](?:\s|$)|\S[\s\S]*?\n)/);
+      if (match && match[1].trim().length >= 12) {
+        const sentence = match[1].trim();
+        speakWithAccent(sentence, {
+          accent: voiceAccent,
+          rate,
+          queue: speechStarted
+        });
+        spokenIndex += match[1].length;
+        speechStarted = true;
+      }
+    };
+
+    try {
+      await sendChatMessageStream(
+        {
+          message: cleanPrompt,
+          mode: isOfflineMode ? "Offline" : "Ask",
+          history,
+          style: "Concise",
+          isOffline: isOfflineMode,
+          webAccess: !isOfflineMode,
+          voiceFast: true,
+          userProfile,
+          activeAgent: voiceAgent,
+          clientDateTime,
+          timezone,
+          memories: memoryItems.slice(0, 6).map(m => ({ title: m.title, value: m.value }))
+        },
+        {
+          onStatus: status => {
+            setToolStatus(status);
+          },
+          onChunk: delta => {
+            accumulated += delta;
+            turnAgentRef.current = accumulated;
+            setAgentTranscript(accumulated);
+            flushSpeechQueue(false);
+          },
+          onDone: meta => {
+            setToolStatus("");
+            const finalText = accumulated.trim() || "I have completed checking that for you.";
+            turnAgentRef.current = finalText;
+            const sources = meta.sources || [];
+            turnSourcesRef.current = sources;
+            setLiveSources(sources);
+
+            flushCurrentTurnToHistory(meta.modelUsed || "Gemini 3.1 Flash Lite (Voice Web)");
+            if (!accumulated.trim()) {
+              accumulated = finalText;
+            }
+            flushSpeechQueue(true);
+          },
+          onError: errMsg => {
+            setToolStatus("");
+            const msg = accumulated.trim() || `Unable to fetch live update: ${errMsg}`;
+            turnAgentRef.current = msg;
+            setAgentTranscript(msg);
+            flushCurrentTurnToHistory("Voice Fallback");
+            setConnectionState("error");
+          }
+        },
+        controller.signal
+      );
+    } catch (err: any) {
+      setToolStatus("");
+      if (err?.name !== "AbortError") {
+        const msg = accumulated.trim() || `Live update error: ${err?.message || "Connection failed"}`;
+        turnAgentRef.current = msg;
+        setAgentTranscript(msg);
+        setConnectionState("error");
+      }
+    }
+  };
+
+  const handleOpenSavedInChat = () => {
+    const targetId = voiceConvIdRef.current || savedConvId;
+    cleanupSession();
+    setIsVoiceModalOpen(false);
+    if (targetId) {
+      setActiveConversationId(targetId);
+      setActiveWorkspaceView("chat");
+    }
   };
 
   const activePersonaTone =
     VOICE_PERSONA_DETAILS.find(v => v.name === selectedVoice)?.tone || "Warm & balanced";
 
   const statusText =
-    connectionState === "listening"
+    toolStatus
+      ? toolStatus
+      : connectionState === "listening"
       ? `Listening · ${voiceAccent === "en-GB" ? "UK English" : "US English"}`
       : connectionState === "speaking"
       ? `Speaking · ${selectedVoice} (${voiceAccent === "en-GB" ? "UK" : "US"})`
       : connectionState === "connecting"
-      ? "Connecting real-time audio stream..."
+      ? "Connecting real-time audio & web engine..."
       : connectionState === "offline"
       ? `Offline Voice · ${voiceAccent === "en-GB" ? "UK English" : "US English"}`
       : connectionState === "error"
-      ? "Microphone or connection paused"
+      ? "Mic unavailable — type below for live web voice answers"
       : "Ready";
 
   const orbScale =
     connectionState === "speaking"
       ? 1.06 + (speakPhase % 4) * 0.025
-      : connectionState === "listening"
-      ? 1 + micLevel * 0.14
       : 1;
 
   const isSessionActive =
@@ -543,9 +848,17 @@ export const VoiceAssistantModal: React.FC = () => {
         <div className="flex items-center gap-3 min-w-0">
           <DiptiKLogo size="xs" showText={false} />
           <div className="text-left min-w-0">
-            <h2 className="font-display text-sm font-semibold tracking-tight text-slate-900 dark:text-white truncate">
-              {voiceAgent ? voiceAgent.name : "DiptiK Voice"}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-display text-sm font-semibold tracking-tight text-slate-900 dark:text-white truncate">
+                {voiceAgent ? voiceAgent.name : "DiptiK Voice"}
+              </h2>
+              {!isOfflineMode && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+                  <Globe className="w-2.5 h-2.5" />
+                  Live Web
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 dark:text-[#94a3b8] truncate">
               {selectedVoice} · {activePersonaTone} · {voiceAccent === "en-GB" ? "UK Accent" : "US Accent"}
             </p>
@@ -553,6 +866,18 @@ export const VoiceAssistantModal: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {savedConvId && (
+            <button
+              type="button"
+              onClick={handleOpenSavedInChat}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#0072FF]/10 hover:bg-[#0072FF]/15 text-[#0072FF] dark:text-[#00E5FF] border border-[#0072FF]/25 text-xs font-medium transition-colors cursor-pointer"
+              title="Open saved voice history in Chat"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>View in History</span>
+            </button>
+          )}
+
           {/* Segmented UK / US Accent Switch */}
           <div
             role="group"
@@ -627,13 +952,14 @@ export const VoiceAssistantModal: React.FC = () => {
       </header>
 
       {/* 2. Center Studio Stage: Acoustic Halo & Editorial Transcript */}
-      <main className="flex-1 min-h-0 flex flex-col items-center justify-center max-w-2xl mx-auto w-full py-6 overflow-y-auto gemini-scroll space-y-8">
+      <main className="flex-1 min-h-0 flex flex-col items-center justify-center max-w-2xl mx-auto w-full py-5 overflow-y-auto gemini-scroll space-y-6">
         {/* Acoustic Orb */}
-        <div className="flex flex-col items-center space-y-5">
-          <div className="relative w-48 h-48 sm:w-52 sm:h-52 flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4 shrink-0">
+          <div className="relative w-40 h-40 sm:w-44 sm:h-44 flex items-center justify-center">
             {/* Ambient Dual-Tone Glow */}
             <div
-              className="absolute inset-2 rounded-full transition-transform duration-150 pointer-events-none"
+              ref={glowRef}
+              className="absolute inset-2 rounded-full transition-transform duration-100 pointer-events-none"
               style={{
                 transform: `scale(${orbScale})`,
                 opacity: connectionState === "error" ? 0.2 : 0.9,
@@ -659,7 +985,7 @@ export const VoiceAssistantModal: React.FC = () => {
                   connectionState === "speaking"
                     ? 6 + Math.abs(Math.sin((idx + speakPhase) * 0.45)) * 14
                     : connectionState === "listening"
-                    ? 3 + Math.max(0.15, micLevel) * (6 + (idx % 3) * 4)
+                    ? 4 + (idx % 3) * 3
                     : 2;
                 const rInner = 66;
                 const rOuter = rInner + wave;
@@ -699,38 +1025,51 @@ export const VoiceAssistantModal: React.FC = () => {
 
             {/* Center Surface Disc */}
             <div
-              className="relative w-24 h-24 rounded-full bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.1] shadow-sm dark:shadow-none flex items-center justify-center transition-transform duration-150"
+              className="relative w-20 h-20 rounded-full bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.1] shadow-sm dark:shadow-none flex items-center justify-center transition-transform duration-150"
               style={{ transform: `scale(${connectionState === "speaking" ? 1.04 : 1})` }}
             >
-              {connectionState === "connecting" ? (
-                <RefreshCw className="w-7 h-7 text-[#0072FF] dark:text-[#00E5FF] animate-spin" strokeWidth={1.75} />
+              {toolStatus ? (
+                <Globe className="w-6 h-6 text-[#0072FF] dark:text-[#00E5FF] animate-pulse" strokeWidth={1.75} />
+              ) : connectionState === "connecting" ? (
+                <RefreshCw className="w-6 h-6 text-[#0072FF] dark:text-[#00E5FF] animate-spin" strokeWidth={1.75} />
               ) : connectionState === "offline" ? (
-                <WifiOff className="w-7 h-7 text-amber-500 dark:text-amber-400" strokeWidth={1.75} />
+                <WifiOff className="w-6 h-6 text-amber-500 dark:text-amber-400" strokeWidth={1.75} />
               ) : connectionState === "speaking" ? (
-                <Volume2 className="w-7 h-7 text-[#0072FF] dark:text-[#00E5FF]" strokeWidth={1.75} />
+                <Volume2 className="w-6 h-6 text-[#0072FF] dark:text-[#00E5FF]" strokeWidth={1.75} />
               ) : (
-                <DiptiKLogo size="md" showText={false} />
+                <DiptiKLogo size="sm" showText={false} />
               )}
             </div>
           </div>
 
           {/* Unboxed State Metadata */}
           <div className="flex flex-col items-center gap-1.5">
-            <p className="text-sm font-medium text-slate-800 dark:text-[#e2e8f0]">{statusText}</p>
-            <button
-              type="button"
-              onClick={handlePreviewVoice}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-[#0072FF] dark:text-[#00E5FF] hover:underline cursor-pointer"
-            >
-              <Volume2 className="w-3.5 h-3.5" />
-              <span>Preview {voiceAccent === "en-GB" ? "UK" : "US"} accent</span>
-            </button>
+            <p className="text-sm font-medium text-slate-800 dark:text-[#e2e8f0] flex items-center gap-2">
+              {toolStatus && <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0072FF] dark:text-[#00E5FF]" />}
+              <span>{statusText}</span>
+            </p>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={handlePreviewVoice}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-[#0072FF] dark:text-[#00E5FF] hover:underline cursor-pointer"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Preview {voiceAccent === "en-GB" ? "UK" : "US"} accent</span>
+              </button>
+              {savedConvId && (
+                <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Saved to your private history</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Error Callout (Clean single-elevation banner) */}
+        {/* Error Callout */}
         {errorMsg && (
-          <div className="w-full max-w-xl p-4 rounded-xl bg-red-50 dark:bg-[#FF1744]/10 border border-red-200 dark:border-[#FF1744]/30 text-xs text-red-700 dark:text-[#ffb3c0] flex items-center justify-between gap-4 text-left">
+          <div className="w-full max-w-xl p-3.5 rounded-xl bg-red-50 dark:bg-[#FF1744]/10 border border-red-200 dark:border-[#FF1744]/30 text-xs text-red-700 dark:text-[#ffb3c0] flex items-center justify-between gap-4 text-left shrink-0">
             <span>{errorMsg}</span>
             <button
               type="button"
@@ -757,23 +1096,48 @@ export const VoiceAssistantModal: React.FC = () => {
             </div>
           )}
 
-          <div className="border-t border-slate-200 dark:border-white/[0.08] pt-4">
-            <div className="text-xs font-medium text-[#0072FF] dark:text-[#00E5FF] mb-1.5">
+          <div className="border-t border-slate-200 dark:border-white/[0.08] pt-4 space-y-3">
+            <div className="text-xs font-medium text-[#0072FF] dark:text-[#00E5FF]">
               {voiceAgent ? voiceAgent.name : "DiptiK AI 3"} · {voiceAccent === "en-GB" ? "British English" : "US English"}
             </div>
-            <p className="text-[15px] sm:text-base text-slate-800 dark:text-[#f1f5f9] leading-relaxed">
+            <p className="text-[15px] sm:text-base text-slate-800 dark:text-[#f1f5f9] leading-relaxed whitespace-pre-wrap">
               {agentTranscript ||
-                "Ask a question, plan your schedule, or request a mobile action in real time."}
+                "Ask for live news, real-time web updates, current prices, website checks, or personal tasks."}
             </p>
+
+            {/* Live Web Grounding Sources */}
+            {liveSources.length > 0 && (
+              <div className="pt-2 space-y-1.5">
+                <div className="text-[11px] font-medium text-slate-500 dark:text-[#94a3b8] flex items-center gap-1.5">
+                  <Globe className="w-3 h-3 text-[#0072FF] dark:text-[#00E5FF]" />
+                  <span>Live Web Sources</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {liveSources.map((src, idx) => (
+                    <a
+                      key={idx}
+                      href={src.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#121520] hover:bg-slate-100 dark:hover:bg-[#181c2b] border border-slate-200 dark:border-white/[0.08] text-xs text-slate-700 dark:text-[#cbd5e1] max-w-[240px] transition-colors"
+                    >
+                      <span className="truncate">{src.title || src.url}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0 text-[#0072FF] dark:text-[#00E5FF]" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Clean Prompt Starters */}
-        <div className="w-full max-w-xl flex flex-wrap gap-2 justify-center">
+        {/* Dynamic Live Web & Task Starter Prompts */}
+        <div className="w-full max-w-xl flex flex-wrap gap-2 justify-center shrink-0">
           {[
-            "Introduce yourself and help me organise my day",
-            "Create a reminder to review notes at 5 PM",
-            "Save a quick note about morning priorities"
+            "Check today's latest world and tech news",
+            "Find the current live Bitcoin and gold prices",
+            "Check my tasks and help me organise today",
+            "Browse bbc.com/news for today's top headline"
           ].map((prompt, i) => (
             <button
               key={i}
@@ -802,7 +1166,7 @@ export const VoiceAssistantModal: React.FC = () => {
               type="text"
               value={inputText}
               onChange={e => setInputText(e.target.value)}
-              placeholder="Send a message to the voice agent..."
+              placeholder="Ask anything live or enter a URL to check..."
               className="flex-1 bg-transparent px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-[#64748b] focus:outline-none"
               autoFocus
             />
@@ -876,7 +1240,7 @@ export const VoiceAssistantModal: React.FC = () => {
         )}
 
         <p className="text-xs text-slate-400 dark:text-[#64748b]">
-          {isMuted ? "Microphone muted" : "Speak naturally — you can interrupt anytime"}
+          {isMuted ? "Microphone muted" : "Live web browsing & private account history enabled"}
         </p>
       </footer>
     </div>

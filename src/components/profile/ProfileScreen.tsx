@@ -39,9 +39,6 @@ export const ProfileScreen: React.FC = () => {
     updateUserProfile,
     firebaseUser,
     isAuthenticated,
-    savedLocalProfiles,
-    switchLocalProfile,
-    createCustomLocalProfile,
     setShowAuth,
     setShowOnboarding,
     setShowAssistantSetup,
@@ -134,7 +131,7 @@ export const ProfileScreen: React.FC = () => {
   const handleCreateQuickProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProfName.trim()) return;
-    await createCustomLocalProfile({
+    await updateUserProfile({
       name: newProfName.trim(),
       nickname: newProfNickname.trim() || newProfName.trim().split(" ")[0],
       defaultEngine: newProfEngine,
@@ -143,7 +140,7 @@ export const ProfileScreen: React.FC = () => {
     setNewProfName("");
     setNewProfNickname("");
     setShowNewProfileForm(false);
-    setSaveMessage("Profile created! Tap 'Talk Live Now' to converse with your agent.");
+    setSaveMessage("Profile updated! Tap 'Talk Live Now' to converse with your agent.");
   };
 
   const navCards = [
@@ -469,37 +466,6 @@ export const ProfileScreen: React.FC = () => {
                   </button>
                 </div>
               </form>
-            )}
-
-            {/* Saved Profiles Quick Switcher */}
-            {savedLocalProfiles.length > 0 && (
-              <div>
-                <label className="text-[11px] font-bold text-gray-500 uppercase block mb-2">
-                  Saved Profiles ({savedLocalProfiles.length})
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {savedLocalProfiles.map((prof, idx) => {
-                    const isCurrent = prof.name === userProfile.name && prof.email === userProfile.email;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => switchLocalProfile(prof)}
-                        className={`px-3.5 py-2 rounded-2xl border text-xs font-bold flex items-center space-x-2 cursor-pointer transition-all ${
-                          isCurrent
-                            ? "bg-purple-600 text-white border-purple-600 shadow-sm"
-                            : "bg-gray-50 hover:bg-gray-100 text-gray-800 border-gray-200"
-                        }`}
-                      >
-                        <span>{prof.nickname || prof.name}</span>
-                        <span className={`text-[10px] ${isCurrent ? "text-purple-200" : "text-gray-400"}`}>
-                          ({prof.defaultEngine?.split(" (")[0]})
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">

@@ -21,13 +21,14 @@ import { VisionModal } from "./components/features/VisionModal";
 import { NotesTasksModal } from "./components/features/NotesTasksModal";
 import { PhoneActionsModal } from "./components/features/PhoneActionsModal";
 
-import { Bell, X } from "lucide-react";
+import { Bell, RefreshCw, X } from "lucide-react";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { OfflineIndicator } from "./components/common/OfflineIndicator";
+import { DiptiKLogo } from "./components/common/DiptiKLogo";
 import { applyAppearanceToDocument, loadAppearanceConfig } from "./lib/appearance";
 
-const MainContent: React.FC = () => {
-  const { notifications, userProfile } = useApp();
+const WorkspaceContent: React.FC = () => {
+  const { notifications } = useApp();
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
@@ -40,21 +41,6 @@ const MainContent: React.FC = () => {
     Boolean(latestNotif) &&
     latestNotif.id !== initialLatestIdRef.current &&
     latestNotif.id !== dismissedNotifId;
-
-  useEffect(() => {
-    const mode =
-      userProfile.theme === "light" || userProfile.theme === "dark" || userProfile.theme === "system"
-        ? userProfile.theme
-        : "system";
-    const syncTheme = () => applyAppearanceToDocument(loadAppearanceConfig(), mode);
-    syncTheme();
-
-    if (mode === "system" && typeof window !== "undefined" && window.matchMedia) {
-      const mql = window.matchMedia("(prefers-color-scheme: dark)");
-      mql.addEventListener("change", syncTheme);
-      return () => mql.removeEventListener("change", syncTheme);
-    }
-  }, [userProfile.theme]);
 
   useEffect(() => {
     if (!hasNewToast || !latestNotif) return;
@@ -131,6 +117,44 @@ const MainContent: React.FC = () => {
       <OfflineIndicator />
     </div>
   );
+};
+
+const MainContent: React.FC = () => {
+  const { authReady, firebaseUser, isAuthenticated, userProfile } = useApp();
+
+  useEffect(() => {
+    const mode =
+      userProfile.theme === "light" || userProfile.theme === "dark" || userProfile.theme === "system"
+        ? userProfile.theme
+        : "system";
+    const syncTheme = () => applyAppearanceToDocument(loadAppearanceConfig(), mode);
+    syncTheme();
+
+    if (mode === "system" && typeof window !== "undefined" && window.matchMedia) {
+      const mql = window.matchMedia("(prefers-color-scheme: dark)");
+      mql.addEventListener("change", syncTheme);
+      return () => mql.removeEventListener("change", syncTheme);
+    }
+  }, [userProfile.theme]);
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen h-screen bg-slate-50 dark:bg-[#0b0d14] text-slate-900 dark:text-[#f8fafc] flex flex-col items-center justify-center p-6 gap-4">
+        <DiptiKLogo size="lg" showText={false} />
+        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-[#94a3b8]">
+          <RefreshCw className="w-4 h-4 animate-spin text-[#0072FF] dark:text-[#00E5FF]" />
+          <span>Checking secure session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Strict privacy gate: unauthenticated or unverified users never load or see workspace data
+  if (!firebaseUser || !firebaseUser.emailVerified || !isAuthenticated) {
+    return <OnboardingModal />;
+  }
+
+  return <WorkspaceContent />;
 };
 
 export default function App() {

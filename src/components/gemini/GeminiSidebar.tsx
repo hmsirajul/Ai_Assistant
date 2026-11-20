@@ -46,9 +46,9 @@ export const GeminiSparkleIcon: React.FC<{ className?: string }> = ({ className 
 );
 
 function getInitials(name: string): string {
-  const parts = (name || "MS").trim().split(/\s+/);
+  const parts = (name || "U").trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  return (name || "U").slice(0, 2).toUpperCase();
 }
 
 export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
@@ -132,7 +132,7 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
   };
 
   const avatarSrc = firebaseUser?.photoURL || userProfile.avatar || "";
-  const displayName = userProfile.name || "MD SIRAJUL ISLAM";
+  const displayName = firebaseUser?.displayName || userProfile.name || "User";
 
   const sidebarBody = (
     <aside className="w-[272px] h-full bg-white dark:bg-[#121520] border-r border-slate-200 dark:border-white/[0.08] flex flex-col text-slate-700 dark:text-[#e2e8f0] select-none transition-colors duration-150">

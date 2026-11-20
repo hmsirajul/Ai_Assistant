@@ -17,12 +17,11 @@ import {
   UserProfile,
   PermissionItem,
   OfflineModelPackage,
-  PhoneAction,
-  VoicePersonaName,
   NotebookItem,
   WorkspaceView,
   ComposerTier,
-  PhoneBridgeConfig
+  PhoneBridgeConfig,
+  PhoneAction
 } from "../types";
 import {
   initialUserProfile,
@@ -55,8 +54,10 @@ import {
   sendPasswordResetEmail,
   updateProfile,
   deleteUser,
+  reload,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -70,14 +71,36 @@ import {
   User
 } from "../lib/firebase";
 
-const LOCAL_PROFILE_KEY = "diptik_active_profile_v1";
-const LOCAL_SAVED_PROFILES_KEY = "diptik_saved_profiles_v1";
-const LOCAL_AUTH_CHOSEN_KEY = "diptik_auth_chosen_v1";
-const LOCAL_CUSTOM_AGENTS_KEY = "diptik_custom_agents_v1";
-const LOCAL_CONVERSATIONS_PREFIX = "diptik_conversations_v2_";
-const LOCAL_NOTEBOOKS_KEY = "diptik_notebooks_v1";
-const LOCAL_DEV_MODE_KEY = "diptik_developer_mode_v1";
-const LOCAL_PHONE_BRIDGE_KEY = "diptik_phone_bridge_v1";
+const LEGACY_STORAGE_KEYS = [
+  "diptik_active_profile_v1",
+  "diptik_saved_profiles_v1",
+  "diptik_auth_chosen_v1",
+  "diptik_custom_agents_v1",
+  "diptik_notebooks_v1",
+  "diptik_phone_bridge_v1"
+];
+
+function purgeLegacyAndUserLocalCaches(uid?: string) {
+  if (typeof window === "undefined") return;
+  try {
+    LEGACY_STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith("diptik_conversations_v2_")) {
+        localStorage.removeItem(key);
+      }
+      if (!uid && key.startsWith("diptik_uid_")) {
+        localStorage.removeItem(key);
+      }
+      if (uid && key.startsWith(`diptik_uid_${uid}_`)) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch {}
+}
+
+function getPhoneBridgeStorageKey(uid: string): string {
+  return `diptik_uid_${uid}_phone_bridge_v1`;
+}
 
 const DEFAULT_PHONE_BRIDGE_CONFIG: PhoneBridgeConfig = {
   channelType: "web_push",
@@ -86,24 +109,21 @@ const DEFAULT_PHONE_BRIDGE_CONFIG: PhoneBridgeConfig = {
   telegramChatId: "",
   dailyBriefingTime: "08:00",
   autoBriefingEnabled: false,
-  city: "Dhaka"
+  city: "London"
 };
 
-function getProfileStorageKey(profile: { uid?: string; email?: string; name?: string }): string {
-  const raw = profile.uid || profile.email || profile.name || "default";
-  return `${LOCAL_CONVERSATIONS_PREFIX}${raw.toLowerCase().replace(/[^a-z0-9@._-]/g, "_")}`;
+function loadPhoneBridgeForUid(uid?: string | null): PhoneBridgeConfig {
+  if (typeof window === "undefined" || !uid) return DEFAULT_PHONE_BRIDGE_CONFIG;
+  try {
+    const raw = localStorage.getItem(getPhoneBridgeStorageKey(uid));
+    if (raw) return { ...DEFAULT_PHONE_BRIDGE_CONFIG, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_PHONE_BRIDGE_CONFIG;
 }
 
-function loadConversationsForProfile(profile: { uid?: string; email?: string; name?: string }): ChatConversation[] {
-  if (typeof window === "undefined") return initialConversations;
-  try {
-    const raw = localStorage.getItem(getProfileStorageKey(profile));
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return initialConversations;
+function sanitizeDocId(rawId: string): string {
+  const cleaned = (rawId || "").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
+  return cleaned || `doc_${Date.now()}`;
 }
 
 function sanitizeForBlueprint(profile: UserProfile, uid: string) {
@@ -113,16 +133,22 @@ function sanitizeForBlueprint(profile: UserProfile, uid: string) {
   const validVoices = ["Zephyr", "Puck", "Charon", "Kore", "Fenrir"];
   const validThemes = ["light", "dark", "system"];
 
+  const safeName = (profile.name || "").trim().slice(0, 100) || "DiptiK User";
+  const safeNick = (profile.nickname || "").trim().slice(0, 50) || safeName.split(" ")[0] || "User";
+  const safeEmail = (profile.email || "").trim().slice(0, 150);
+
   return {
     uid,
-    name: (profile.name || "User").slice(0, 100),
-    nickname: (profile.nickname || profile.name || "User").slice(0, 50),
-    email: (profile.email || "user@diptik.ai").slice(0, 150),
+    name: safeName,
+    nickname: safeNick,
+    handle: (profile.handle || safeNick.toLowerCase().replace(/[^a-z0-9_]/g, "")).slice(0, 50),
+    ageRange: (profile.ageRange || "").slice(0, 30),
+    email: safeEmail.length >= 3 ? safeEmail : "user@diptik.ai",
     phone: (profile.phone || "").slice(0, 30),
-    country: (profile.country || "United States").slice(0, 60),
-    language: (profile.language || "English (US)").slice(0, 40),
-    plan: validPlans.includes(profile.plan) ? profile.plan : "Pro AI Agent",
-    avatar: (profile.avatar || initialUserProfile.avatar).slice(0, 500),
+    country: (profile.country || "").slice(0, 60),
+    language: (profile.language || "English (GB)").slice(0, 40),
+    plan: validPlans.includes(profile.plan) ? profile.plan : "Free Lite",
+    avatar: (profile.avatar || "").slice(0, 900),
     style: validStyles.includes(profile.style) ? profile.style : "Balanced",
     speed: validSpeeds.includes(profile.speed) ? profile.speed : "1.0x",
     wakePhrase: Boolean(profile.wakePhrase),
@@ -134,9 +160,44 @@ function sanitizeForBlueprint(profile: UserProfile, uid: string) {
     authProvider: (profile.authProvider || "google").slice(0, 40),
     voiceName: validVoices.includes(profile.voiceName || "Zephyr") ? profile.voiceName || "Zephyr" : "Zephyr",
     customInstructions: (profile.customInstructions || "").slice(0, 1000),
-    theme: validThemes.includes(profile.theme || "light") ? profile.theme || "light" : "light",
+    theme: validThemes.includes(profile.theme || "system") ? profile.theme || "system" : "system",
     wakeWordEnabled: Boolean(profile.wakeWordEnabled ?? true)
   };
+}
+
+function sanitizeMessagesForFirestore(messages: ChatMessage[]) {
+  return messages.slice(-150).map(m => {
+    const cleanMsg: Record<string, any> = {
+      id: String(m.id || `msg_${Date.now()}`).slice(0, 120),
+      sender: m.sender === "user" ? "user" : "ai",
+      text: String(m.text || "").slice(0, 16000),
+      timestamp: String(m.timestamp || "").slice(0, 40),
+      mode: m.mode || "Ask"
+    };
+    if (m.modelUsed) cleanMsg.modelUsed = String(m.modelUsed).slice(0, 80);
+    if (m.actionCard) cleanMsg.actionCard = JSON.parse(JSON.stringify(m.actionCard));
+    if (Array.isArray(m.sources) && m.sources.length > 0) {
+      cleanMsg.sources = m.sources.slice(0, 10).map(s => ({
+        title: String(s.title || "").slice(0, 200),
+        url: String(s.url || "").slice(0, 500),
+        credibility: String(s.credibility || "").slice(0, 60)
+      }));
+    }
+    if (m.fileAttachment) {
+      cleanMsg.fileAttachment = {
+        name: String(m.fileAttachment.name || "").slice(0, 200),
+        size: String(m.fileAttachment.size || "").slice(0, 40),
+        type: String(m.fileAttachment.type || "").slice(0, 80)
+      };
+    }
+    if (Array.isArray(m.suggestedCommands) && m.suggestedCommands.length > 0) {
+      cleanMsg.suggestedCommands = m.suggestedCommands.slice(0, 6).map(s => String(s).slice(0, 120));
+    }
+    if (typeof m.imageAttachment === "string" && m.imageAttachment.length <= 20000) {
+      cleanMsg.imageAttachment = m.imageAttachment;
+    }
+    return cleanMsg;
+  });
 }
 
 interface AppContextType {
@@ -175,7 +236,7 @@ interface AppContextType {
   isAuthenticated: boolean;
   setIsAuthenticated: (val: boolean) => void;
   signInWithGoogle: () => Promise<UserProfile>;
-  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<{ needsVerification: boolean }>;
   registerWithEmail: (params: {
     name: string;
     nickname: string;
@@ -184,14 +245,12 @@ interface AppContextType {
     phone?: string;
     country?: string;
     defaultEngine?: string;
-    voiceName?: VoicePersonaName;
+    voiceName?: UserProfile["voiceName"];
     persona?: string;
   }) => Promise<{ needsVerification: boolean }>;
+  reloadAuthUser: () => Promise<boolean>;
+  resendVerificationEmail: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
-  createCustomLocalProfile: (params: Partial<UserProfile>) => Promise<UserProfile>;
-  useDefaultProfilePreset: (engine?: string) => void;
-  savedLocalProfiles: UserProfile[];
-  switchLocalProfile: (profile: UserProfile) => void;
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
 
@@ -218,6 +277,14 @@ interface AppContextType {
     attachment?: any,
     options?: { webAccess?: boolean; signal?: AbortSignal; newConversation?: boolean }
   ) => Promise<void>;
+  recordVoiceExchange: (params: {
+    conversationId?: string | null;
+    userText: string;
+    assistantText: string;
+    sources?: { title: string; url: string; credibility: string }[];
+    modelUsed?: string;
+    mode?: AIMode;
+  }) => string | null;
   deleteConversation: (id: string) => void;
   togglePinConversation: (id: string) => void;
 
@@ -360,7 +427,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Firebase Auth & Onboarding States (Never block arrival with a forced popup)
+  // Strict Firebase Auth States
   const [authReady, setAuthReady] = useState<boolean>(false);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [showSplash, setShowSplash] = useState<boolean>(false);
@@ -369,45 +436,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [showAssistantSetup, setShowAssistantSetup] = useState<boolean>(false);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Saved local profiles for quick switching / default mode
-  const [savedLocalProfiles, setSavedLocalProfiles] = useState<UserProfile[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(LOCAL_SAVED_PROFILES_KEY);
-        if (raw) return JSON.parse(raw);
-      } catch {}
-    }
-    return [initialUserProfile];
-  });
-
-  // Core Data State
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(LOCAL_PROFILE_KEY);
-        if (raw) return { ...initialUserProfile, ...JSON.parse(raw) };
-      } catch {}
-    }
-    return initialUserProfile;
-  });
-
+  // Core Private Per-User State (ALWAYS initialized blank so zero data leaks before login)
+  const [userProfile, setUserProfile] = useState<UserProfile>(initialUserProfile);
   const [permissions, setPermissions] = useState<PermissionItem[]>(initialPermissions);
   const [offlinePackages, setOfflinePackages] = useState<OfflineModelPackage[]>(initialOfflinePackages);
-  const [conversations, setConversations] = useState<ChatConversation[]>(() =>
-    loadConversationsForProfile(userProfile)
-  );
+  const [conversations, setConversations] = useState<ChatConversation[]>(initialConversations);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeChatAgent, setActiveChatAgent] = useState<AgentTemplate | null>(null);
-
-  const [customAgents, setCustomAgents] = useState<AgentTemplate[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(LOCAL_CUSTOM_AGENTS_KEY);
-        if (raw) return JSON.parse(raw);
-      } catch {}
-    }
-    return [];
-  });
+  const [customAgents, setCustomAgents] = useState<AgentTemplate[]>([]);
   const agentTemplates = [...customAgents, ...initialAgentTemplates];
 
   const [activeAgentPlan, setActiveAgentPlan] = useState<AgentPlan | null>(null);
@@ -416,18 +452,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [skills, setSkills] = useState<SkillItem[]>(initialSkills);
   const [integrations, setIntegrations] = useState<IntegrationItem[]>(initialIntegrations);
   const [knowledge, setKnowledge] = useState<KnowledgeItem[]>(initialKnowledge);
-  const [notebooks, setNotebooks] = useState<NotebookItem[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(LOCAL_NOTEBOOKS_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch {}
-    }
-    return initialNotebooks;
-  });
+  const [notebooks, setNotebooks] = useState<NotebookItem[]>(initialNotebooks);
   const [activeNotebookId, setActiveNotebookId] = useState<string | null>(null);
   const [notes, setNotes] = useState<NoteItem[]>(initialNotes);
   const [tasks, setTasks] = useState<TaskItem[]>(initialTasks);
@@ -447,51 +472,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState<boolean>(false);
   const [activeCommandConfirmation, setActiveCommandConfirmation] = useState<any>(null);
 
-  const [developerMode, setDeveloperModeState] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        return localStorage.getItem(LOCAL_DEV_MODE_KEY) === "true";
-      } catch {}
-    }
-    return false;
-  });
-
+  const [developerMode, setDeveloperModeState] = useState<boolean>(false);
   const setDeveloperMode = (val: boolean) => {
     setDeveloperModeState(val);
-    if (typeof window !== "undefined") {
+    const uid = auth.currentUser?.uid;
+    if (typeof window !== "undefined" && uid) {
       try {
-        localStorage.setItem(LOCAL_DEV_MODE_KEY, val ? "true" : "false");
+        localStorage.setItem(`diptik_uid_${uid}_dev_mode`, val ? "true" : "false");
       } catch {}
     }
   };
 
-  const [phoneBridgeConfig, setPhoneBridgeConfig] = useState<PhoneBridgeConfig>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(LOCAL_PHONE_BRIDGE_KEY);
-        if (raw) return { ...DEFAULT_PHONE_BRIDGE_CONFIG, ...JSON.parse(raw) };
-      } catch {}
-    }
-    return DEFAULT_PHONE_BRIDGE_CONFIG;
-  });
-
+  const [phoneBridgeConfig, setPhoneBridgeConfig] = useState<PhoneBridgeConfig>(DEFAULT_PHONE_BRIDGE_CONFIG);
   const updatePhoneBridgeConfig = (updates: Partial<PhoneBridgeConfig>) => {
     setPhoneBridgeConfig(prev => {
       const next = { ...prev, ...updates };
-      if (typeof window !== "undefined") {
+      const uid = auth.currentUser?.uid;
+      if (typeof window !== "undefined" && uid) {
         try {
-          localStorage.setItem(LOCAL_PHONE_BRIDGE_KEY, JSON.stringify(next));
+          localStorage.setItem(getPhoneBridgeStorageKey(uid), JSON.stringify(next));
         } catch {}
       }
       return next;
     });
   };
 
-  const profileUnsubRef = useRef<(() => void) | null>(null);
-  const agentsUnsubRef = useRef<(() => void) | null>(null);
-  const memoriesUnsubRef = useRef<(() => void) | null>(null);
+  const unsubsRef = useRef<(() => void)[]>([]);
+  const activeUidRef = useRef<string | null>(null);
+  const conversationsRef = useRef<ChatConversation[]>([]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  const resetPrivateWorkspaceState = () => {
+    setUserProfile(initialUserProfile);
+    setConversations([]);
+    setActiveConversationId(null);
+    setActiveChatAgent(null);
+    setCustomAgents([]);
+    setNotebooks([]);
+    setActiveNotebookId(null);
+    setNotes([]);
+    setTasks([]);
+    setActivityLogs([]);
+    setMemoryItems([]);
+    setNotifications([]);
+    setAutomations([]);
+    setKnowledge([]);
+    setIntegrations(initialIntegrations);
+    setPermissions(initialPermissions);
+    setPhoneBridgeConfig(DEFAULT_PHONE_BRIDGE_CONFIG);
+    setDeveloperModeState(false);
+    setActiveWorkspaceView("chat");
+    setIsSettingsModalOpen(false);
+    setIsVoiceModalOpen(false);
+    setIsResearchModalOpen(false);
+    setIsVisionModalOpen(false);
+    setIsNotesModalOpen(false);
+    setIsPhoneActionsModalOpen(false);
+    setIsErrorTesterModalOpen(false);
+    setIsGetAppModalOpen(false);
+    setIsUpgradeModalOpen(false);
+  };
 
   useEffect(() => {
+    purgeLegacyAndUserLocalCaches();
     checkServerHealth().then(data => {
       setServerOnlineCapable(data.onlineModeAvailable);
       setLiveVoiceCapable(Boolean(data.liveVoiceAvailable ?? data.onlineModeAvailable));
@@ -501,178 +546,347 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   }, []);
 
-  // Persist local profile & custom agents
-  useEffect(() => {
+  const attachVerifiedUserListeners = async (user: User) => {
+    const uid = user.uid;
+    activeUidRef.current = uid;
+    const userDocPath = `users/${uid}`;
+    const userRef = doc(db, "users", uid);
+
+    // Load user-scoped local preferences (non-sensitive UI prefs)
+    setPhoneBridgeConfig(loadPhoneBridgeForUid(uid));
     if (typeof window !== "undefined") {
       try {
-        localStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(userProfile));
+        setDeveloperModeState(localStorage.getItem(`diptik_uid_${uid}_dev_mode`) === "true");
       } catch {}
     }
-  }, [userProfile]);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(LOCAL_SAVED_PROFILES_KEY, JSON.stringify(savedLocalProfiles));
-      } catch {}
-    }
-  }, [savedLocalProfiles]);
+    try {
+      const snap = await getDoc(userRef);
+      if (activeUidRef.current !== uid) return;
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(LOCAL_NOTEBOOKS_KEY, JSON.stringify(notebooks));
-      } catch {}
-    }
-  }, [notebooks]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const persistable = conversations
-          .filter(c => !c.isTemporary)
-          .map(c => ({
-            ...c,
-            messages: c.messages.map(m => ({ ...m, isStreaming: false, statusText: undefined }))
-          }));
-        localStorage.setItem(getProfileStorageKey(userProfile), JSON.stringify(persistable));
-      } catch {}
-    }
-  }, [conversations, userProfile]);
-
-  // Listen to Firebase Auth state & attach Firestore listeners when signed in and verified
-  useEffect(() => {
-    const cleanupListeners = () => {
-      if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
-      if (agentsUnsubRef.current) { agentsUnsubRef.current(); agentsUnsubRef.current = null; }
-      if (memoriesUnsubRef.current) { memoriesUnsubRef.current(); memoriesUnsubRef.current = null; }
-    };
-
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      cleanupListeners();
-      setFirebaseUser(user);
-
-      if (user) {
-        setIsAuthenticated(true);
-        setConversations(loadConversationsForProfile({ uid: user.uid, email: user.email || undefined }));
-        setActiveConversationId(null);
-        const userDocPath = `users/${user.uid}`;
-        const userRef = doc(db, "users", user.uid);
-
-        if (user.emailVerified) {
-          try {
-            const snap = await getDoc(userRef);
-            if (!snap.exists()) {
-              const newProfile: UserProfile = {
-                ...initialUserProfile,
-                uid: user.uid,
-                name: (user.displayName || user.email?.split("@")[0] || "DiptiK User").slice(0, 100),
-                nickname: (user.displayName?.split(" ")[0] || user.email?.split("@")[0] || "Friend").slice(0, 50),
-                email: (user.email || "user@diptik.ai").slice(0, 150),
-                avatar: user.photoURL || initialUserProfile.avatar,
-                authProvider: user.providerData?.[0]?.providerId === "google.com" ? "google" : "email"
-              };
-              const payload = {
-                ...sanitizeForBlueprint(newProfile, user.uid),
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              };
-              await setDoc(userRef, payload);
-              setUserProfile(newProfile);
-            }
-          } catch (err) {
-            handleFirestoreError(err, OperationType.WRITE, userDocPath);
-          }
-
-          // Subscribe to user profile document
-          profileUnsubRef.current = onSnapshot(
-            userRef,
-            (docSnap) => {
-              if (docSnap.exists()) {
-                const data = docSnap.data() as Partial<UserProfile>;
-                setUserProfile(prev => ({
-                  ...prev,
-                  ...data,
-                  uid: user.uid
-                }));
-              }
-            },
-            (err) => {
-              handleFirestoreError(err, OperationType.GET, userDocPath);
-            }
-          );
-
-          // Subscribe to user's custom agents (query enforces ownerId == uid)
-          const agentsPath = `users/${user.uid}/agents`;
-          const agentsQuery = query(collection(db, "users", user.uid, "agents"), where("ownerId", "==", user.uid));
-          agentsUnsubRef.current = onSnapshot(
-            agentsQuery,
-            (snapshot) => {
-              const loaded: AgentTemplate[] = snapshot.docs.map(d => {
-                const data = d.data();
-                return {
-                  id: d.id,
-                  name: data.name || "Custom Agent",
-                  icon: data.icon || "Sparkles",
-                  description: data.description || "",
-                  goal: data.goal || "",
-                  tools: Array.isArray(data.tools) ? data.tools : [],
-                  memory: data.memory || "Long-term memory",
-                  category: data.category || "Productivity",
-                  instructions: data.instructions || "",
-                  voiceName: data.voiceName || "Zephyr",
-                  isCustom: true
-                };
-              });
-              setCustomAgents(loaded);
-            },
-            (err) => {
-              handleFirestoreError(err, OperationType.LIST, agentsPath);
-            }
-          );
-
-          // Subscribe to user's memories
-          const memoriesPath = `users/${user.uid}/memories`;
-          const memoriesQuery = query(collection(db, "users", user.uid, "memories"), where("ownerId", "==", user.uid));
-          memoriesUnsubRef.current = onSnapshot(
-            memoriesQuery,
-            (snapshot) => {
-              if (!snapshot.empty) {
-                const loadedMem: MemoryItem[] = snapshot.docs.map(d => {
-                  const data = d.data();
-                  return {
-                    id: d.id,
-                    category: data.category || "Personal",
-                    title: data.title || "",
-                    value: data.value || "",
-                    fact: data.value || "",
-                    updatedAt: "Synced"
-                  };
-                });
-                setMemoryItems(loadedMem);
-              }
-            },
-            (err) => {
-              handleFirestoreError(err, OperationType.LIST, memoriesPath);
-            }
-          );
-        } else {
-          // Authenticated via email/password but email not verified yet -> keep local profile state
-          setUserProfile(prev => ({
-            ...prev,
-            uid: user.uid,
-            name: user.displayName || prev.name,
-            email: user.email || prev.email,
-            authProvider: "email"
-          }));
+      if (!snap.exists()) {
+        const providerId = user.providerData?.[0]?.providerId;
+        const derivedName = (user.displayName || user.email?.split("@")[0] || "DiptiK User").slice(0, 100);
+        const derivedNickname = (derivedName.split(/\s+/)[0] || "User").slice(0, 50);
+        const newProfile: UserProfile = {
+          ...initialUserProfile,
+          uid,
+          name: derivedName,
+          nickname: derivedNickname,
+          handle: derivedNickname.toLowerCase().replace(/[^a-z0-9_]/g, ""),
+          email: (user.email || "").slice(0, 150),
+          avatar: (user.photoURL || "").slice(0, 900),
+          authProvider: providerId === "google.com" ? "google" : "email"
+        };
+        const payload = {
+          ...sanitizeForBlueprint(newProfile, uid),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        };
+        await setDoc(userRef, payload);
+        if (activeUidRef.current === uid) {
+          setUserProfile(newProfile);
         }
       } else {
-        // Not signed into Firebase; check if user already picked default/local profile
-        const chosen = typeof window !== "undefined" && localStorage.getItem(LOCAL_AUTH_CHOSEN_KEY);
-        setIsAuthenticated(Boolean(chosen));
+        const data = snap.data() as Partial<UserProfile>;
+        if (activeUidRef.current === uid) {
+          setUserProfile({
+            ...initialUserProfile,
+            ...data,
+            uid
+          });
+        }
       }
+    } catch (err) {
+      console.error("Error initializing user profile in Firestore:", err);
+      if (err instanceof Error && err.message.includes("Missing or insufficient permissions")) {
+        handleFirestoreError(err, OperationType.WRITE, userDocPath);
+      }
+    }
 
-      setAuthReady(true);
+    if (activeUidRef.current !== uid) return;
+
+    const addSub = (unsub: () => void) => {
+      unsubsRef.current.push(unsub);
+    };
+
+    // 1. Profile Listener
+    addSub(
+      onSnapshot(
+        userRef,
+        docSnap => {
+          if (activeUidRef.current !== uid) return;
+          if (docSnap.exists()) {
+            const data = docSnap.data() as Partial<UserProfile>;
+            setUserProfile(prev => ({
+              ...prev,
+              ...data,
+              uid
+            }));
+          }
+        },
+        err => {
+          handleFirestoreError(err, OperationType.GET, userDocPath);
+        }
+      )
+    );
+
+    // 2. Custom Agents Listener
+    const agentsPath = `users/${uid}/agents`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "agents"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loaded: AgentTemplate[] = snapshot.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              name: data.name || "Custom Agent",
+              icon: data.icon || "Sparkles",
+              description: data.description || "",
+              goal: data.goal || "",
+              tools: Array.isArray(data.tools) ? data.tools : [],
+              memory: data.memory || "Private memory",
+              category: data.category || "Productivity",
+              instructions: data.instructions || "",
+              voiceName: data.voiceName || "Zephyr",
+              isCustom: true
+            };
+          });
+          setCustomAgents(loaded);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, agentsPath);
+        }
+      )
+    );
+
+    // 3. Memories Listener (Always overwrite with user's exact memories, including empty [])
+    const memoriesPath = `users/${uid}/memories`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "memories"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedMem: MemoryItem[] = snapshot.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              category: data.category || "Personal",
+              title: data.title || "",
+              value: data.value || "",
+              fact: data.value || "",
+              updatedAt: "Synced"
+            };
+          });
+          setMemoryItems(loadedMem);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, memoriesPath);
+        }
+      )
+    );
+
+    // 4. Conversations Listener
+    const convsPath = `users/${uid}/conversations`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "conversations"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedConvs: ChatConversation[] = snapshot.docs
+            .map(d => {
+              const data = d.data();
+              const updatedMs = data.updatedAt?.toMillis ? data.updatedAt.toMillis() : 0;
+              return {
+                id: d.id,
+                title: data.title || "Conversation",
+                lastMessage: data.lastMessage || "",
+                updatedAt: data.updatedAtLabel || "Recently",
+                mode: data.mode || "Ask",
+                isPinned: Boolean(data.isPinned),
+                isArchived: Boolean(data.isArchived),
+                messages: Array.isArray(data.messages) ? data.messages : [],
+                _sortMs: updatedMs
+              };
+            })
+            .sort((a: any, b: any) => (b._sortMs || 0) - (a._sortMs || 0))
+            .map(({ _sortMs, ...rest }: any) => rest);
+          setConversations(loadedConvs);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, convsPath);
+        }
+      )
+    );
+
+    // 5. Notebooks Listener
+    const notebooksPath = `users/${uid}/notebooks`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "notebooks"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedNbs: NotebookItem[] = snapshot.docs
+            .map(d => {
+              const data = d.data();
+              const updatedMs = data.updatedAt?.toMillis ? data.updatedAt.toMillis() : 0;
+              return {
+                id: d.id,
+                title: data.title || "Untitled Notebook",
+                description: data.description || "",
+                content: data.content || "",
+                tags: Array.isArray(data.tags) ? data.tags : [],
+                updatedAt: data.updatedAtLabel || "Recently",
+                pinned: Boolean(data.pinned),
+                _sortMs: updatedMs
+              };
+            })
+            .sort((a: any, b: any) => (b._sortMs || 0) - (a._sortMs || 0))
+            .map(({ _sortMs, ...rest }: any) => rest);
+          setNotebooks(loadedNbs);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, notebooksPath);
+        }
+      )
+    );
+
+    // 6. Notes Listener
+    const notesPath = `users/${uid}/notes`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "notes"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedNotes: NoteItem[] = snapshot.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              title: data.title || "Untitled Note",
+              content: data.content || "",
+              tags: Array.isArray(data.tags) ? data.tags : [],
+              createdAt: data.createdAtLabel || "Recently",
+              updatedAt: data.updatedAtLabel || "Recently",
+              isPinned: Boolean(data.isPinned),
+              checklist: Array.isArray(data.checklist) ? data.checklist : []
+            };
+          });
+          setNotes(loadedNotes);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, notesPath);
+        }
+      )
+    );
+
+    // 7. Tasks Listener
+    const tasksPath = `users/${uid}/tasks`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "tasks"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedTasks: TaskItem[] = snapshot.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              title: data.title || "Task",
+              dueDate: data.dueDate || "Today",
+              time: data.time || "12:00 PM",
+              priority: data.priority || "Medium",
+              status: data.status || "Today",
+              aiSuggestion: data.aiSuggestion,
+              reminderSet: Boolean(data.reminderSet)
+            };
+          });
+          setTasks(loadedTasks);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, tasksPath);
+        }
+      )
+    );
+
+    // 8. Activity Logs Listener
+    const logsPath = `users/${uid}/activityLogs`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "activityLogs"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedLogs: ActivityLogItem[] = snapshot.docs
+            .map(d => {
+              const data = d.data();
+              const createdMs = data.createdAt?.toMillis ? data.createdAt.toMillis() : 0;
+              return {
+                id: d.id,
+                command: data.command || "",
+                interpretation: data.interpretation || "",
+                actionPerformed: data.actionPerformed || "",
+                serviceUsed: data.serviceUsed || "",
+                dataAccessed: data.dataAccessed || "",
+                permissionUsed: data.permissionUsed || "",
+                result: data.result || "Success",
+                timestamp: data.timestampLabel || "Recently",
+                confirmationLevel: data.confirmationLevel ?? 1,
+                _sortMs: createdMs
+              };
+            })
+            .sort((a: any, b: any) => (b._sortMs || 0) - (a._sortMs || 0))
+            .map(({ _sortMs, ...rest }: any) => rest);
+          setActivityLogs(loadedLogs);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, logsPath);
+        }
+      )
+    );
+  };
+
+  // Listen strictly to Firebase Auth state; NEVER load shared/fallback data for unauthenticated visitors
+  useEffect(() => {
+    const cleanupListeners = () => {
+      unsubsRef.current.forEach(unsub => {
+        try {
+          unsub();
+        } catch {}
+      });
+      unsubsRef.current = [];
+    };
+
+    const unsubAuth = onAuthStateChanged(auth, async user => {
+      cleanupListeners();
+      activeUidRef.current = null;
+      resetPrivateWorkspaceState();
+      setFirebaseUser(user);
+
+      try {
+        if (user) {
+          if (user.emailVerified) {
+            setIsAuthenticated(true);
+            await attachVerifiedUserListeners(user);
+          } else {
+            // Unverified email/password user: keep isolated on verify gate without exposing any data
+            setIsAuthenticated(false);
+            setUserProfile({
+              ...initialUserProfile,
+              uid: user.uid,
+              name: user.displayName || user.email?.split("@")[0] || "DiptiK User",
+              nickname: (user.displayName?.split(" ")[0] || user.email?.split("@")[0] || "User").slice(0, 50),
+              email: user.email || "",
+              authProvider: "email"
+            });
+          }
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch (err) {
+        console.error("Auth state initialization error:", err);
+      } finally {
+        setAuthReady(true);
+      }
     });
 
     return () => {
@@ -684,56 +898,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const signInWithGoogle = async (): Promise<UserProfile> => {
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "google");
-    }
+    const derivedName = (user.displayName || user.email?.split("@")[0] || "DiptiK User").slice(0, 100);
     const profile: UserProfile = {
-      ...userProfile,
+      ...initialUserProfile,
       uid: user.uid,
-      name: (user.displayName || user.email?.split("@")[0] || "DiptiK User").slice(0, 100),
-      nickname: (user.displayName?.split(" ")[0] || user.email?.split("@")[0] || "Friend").slice(0, 50),
+      name: derivedName,
+      nickname: (derivedName.split(/\s+/)[0] || "User").slice(0, 50),
       email: (user.email || "").slice(0, 150),
-      avatar: user.photoURL || initialUserProfile.avatar,
+      avatar: (user.photoURL || "").slice(0, 900),
       authProvider: "google"
     };
-    setUserProfile(profile);
-    setConversations(loadConversationsForProfile(profile));
-    setActiveConversationId(null);
-    setIsAuthenticated(true);
+    setIsAuthenticated(Boolean(user.emailVerified));
     setShowAuth(false);
     setShowOnboarding(false);
     addNotification({
       title: "Signed in with Google",
-      message: `Welcome ${profile.nickname}! Your profile and custom agents sync automatically.`,
+      message: `Welcome ${profile.nickname}! Your private workspace is ready.`,
       category: "system"
     });
     return profile;
   };
 
-  const signInWithEmail = async (email: string, password: string) => {
-    const cred = await signInWithEmailAndPassword(auth, email, password);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "email");
+  const signInWithEmail = async (email: string, password: string): Promise<{ needsVerification: boolean }> => {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+    const needsVerification = !cred.user.emailVerified;
+    if (!needsVerification) {
+      setIsAuthenticated(true);
+      setShowAuth(false);
+      setShowOnboarding(false);
+      addNotification({
+        title: "Signed In",
+        message: `Welcome back, ${cred.user.displayName || cred.user.email}!`,
+        category: "system"
+      });
+    } else {
+      setIsAuthenticated(false);
     }
-    const emailProf: UserProfile = {
-      ...userProfile,
-      uid: cred.user.uid,
-      name: cred.user.displayName || email.split("@")[0] || userProfile.name,
-      nickname: (cred.user.displayName?.split(" ")[0] || email.split("@")[0] || userProfile.nickname),
-      email: cred.user.email || email,
-      authProvider: "email"
-    };
-    setUserProfile(emailProf);
-    setConversations(loadConversationsForProfile(emailProf));
-    setActiveConversationId(null);
-    setIsAuthenticated(true);
-    setShowAuth(false);
-    setShowOnboarding(false);
-    addNotification({
-      title: "Signed In",
-      message: `Welcome back, ${cred.user.displayName || cred.user.email}!`,
-      category: "system"
-    });
+    return { needsVerification };
   };
 
   const registerWithEmail = async (params: {
@@ -744,11 +945,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     phone?: string;
     country?: string;
     defaultEngine?: string;
-    voiceName?: VoicePersonaName;
+    voiceName?: UserProfile["voiceName"];
     persona?: string;
   }) => {
-    const cred = await createUserWithEmailAndPassword(auth, params.email, params.password);
-    await updateProfile(cred.user, { displayName: params.name });
+    const cred = await createUserWithEmailAndPassword(auth, params.email.trim(), params.password);
+    await updateProfile(cred.user, { displayName: params.name.trim() });
     try {
       await sendEmailVerification(cred.user);
     } catch (e) {
@@ -757,117 +958,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newProf: UserProfile = {
       ...initialUserProfile,
       uid: cred.user.uid,
-      name: params.name,
-      nickname: params.nickname || params.name.split(" ")[0],
-      email: params.email,
-      phone: params.phone || initialUserProfile.phone,
-      country: params.country || initialUserProfile.country,
+      name: params.name.trim(),
+      nickname: (params.nickname || params.name.trim().split(" ")[0] || "User").slice(0, 50),
+      email: params.email.trim(),
+      phone: params.phone || "",
+      country: params.country || "",
       defaultEngine: params.defaultEngine || initialUserProfile.defaultEngine,
       voiceName: params.voiceName || "Zephyr",
       persona: params.persona || initialUserProfile.persona,
       authProvider: "email"
     };
     setUserProfile(newProf);
-    setConversations([]);
-    setActiveConversationId(null);
-    setSavedLocalProfiles(prev => [newProf, ...prev.filter(p => p.email !== newProf.email)]);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "email");
-    }
-    setIsAuthenticated(true);
+    setIsAuthenticated(Boolean(cred.user.emailVerified));
     return { needsVerification: !cred.user.emailVerified };
   };
 
+  const reloadAuthUser = async (): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    await reload(auth.currentUser);
+    if (auth.currentUser.emailVerified) {
+      await auth.currentUser.getIdToken(true);
+      setFirebaseUser(auth.currentUser);
+      setIsAuthenticated(true);
+      setShowAuth(false);
+      setShowOnboarding(false);
+      if (activeUidRef.current !== auth.currentUser.uid) {
+        await attachVerifiedUserListeners(auth.currentUser);
+      }
+      return true;
+    }
+    return false;
+  };
+
+  const resendVerificationEmail = async (): Promise<void> => {
+    if (!auth.currentUser) throw new Error("No active user session.");
+    await sendEmailVerification(auth.currentUser);
+  };
+
   const sendPasswordReset = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
-  };
-
-  const createCustomLocalProfile = async (params: Partial<UserProfile>): Promise<UserProfile> => {
-    const profile: UserProfile = {
-      ...initialUserProfile,
-      ...params,
-      name: params.name || "Custom User",
-      nickname: params.nickname || params.name?.split(" ")[0] || "Friend",
-      email: params.email || `${(params.nickname || "user").toLowerCase().replace(/\s+/g, "")}@diptik.ai`,
-      authProvider: auth.currentUser ? userProfile.authProvider : "default",
-      defaultEngine: params.defaultEngine || "Gemini 4 Hydrogen (Default)",
-      voiceName: params.voiceName || "Zephyr"
-    };
-
-    setUserProfile(profile);
-    setConversations(loadConversationsForProfile(profile));
-    setActiveConversationId(null);
-    setSavedLocalProfiles(prev => [
-      profile,
-      ...prev.filter(p => p.email !== profile.email && p.name !== profile.name)
-    ]);
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "profile");
-    }
-    setIsAuthenticated(true);
-    setShowAuth(false);
-    setShowOnboarding(false);
-
-    if (auth.currentUser && auth.currentUser.emailVerified) {
-      await updateUserProfile(profile);
-    }
-
-    addNotification({
-      title: "Profile Created",
-      message: `Profile "${profile.name}" is active with ${profile.defaultEngine}. Tap Voice to talk to your agent!`,
-      category: "system"
-    });
-    return profile;
-  };
-
-  const useDefaultProfilePreset = (engine?: string) => {
-    const selectedEngine = engine || "Gemini 4 Hydrogen (Default)";
-    const preset: UserProfile = {
-      ...initialUserProfile,
-      defaultEngine: selectedEngine,
-      authProvider: "default",
-      nickname: selectedEngine.includes("ChatGPT")
-        ? "ChatGPT User"
-        : selectedEngine.includes("Claude")
-        ? "Claude User"
-        : "Explorer"
-    };
-    setUserProfile(preset);
-    setConversations(loadConversationsForProfile(preset));
-    setActiveConversationId(null);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "default");
-    }
-    setIsOfflineMode(selectedEngine.includes("Offline"));
-    setIsAuthenticated(true);
-    setShowAuth(false);
-    setShowOnboarding(false);
-    addNotification({
-      title: "Default Profile Ready",
-      message: `Active engine: ${selectedEngine}. You can create a custom profile or sign in anytime.`,
-      category: "system"
-    });
-  };
-
-  const switchLocalProfile = (profile: UserProfile) => {
-    setUserProfile(profile);
-    setConversations(loadConversationsForProfile(profile));
-    setActiveConversationId(null);
-    setIsOfflineMode((profile.defaultEngine || "").includes("Offline"));
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_AUTH_CHOSEN_KEY, "profile");
-    }
-    setIsAuthenticated(true);
-    setShowAuth(false);
-    addNotification({
-      title: "Switched Profile",
-      message: `Now using profile: ${profile.name} (${profile.defaultEngine})`,
-      category: "system"
-    });
+    await sendPasswordResetEmail(auth, email.trim());
   };
 
   const logout = async () => {
+    const currentUid = auth.currentUser?.uid;
+    unsubsRef.current.forEach(unsub => {
+      try {
+        unsub();
+      } catch {}
+    });
+    unsubsRef.current = [];
+    activeUidRef.current = null;
+
     try {
       if (auth.currentUser) {
         await signOut(auth);
@@ -875,59 +1016,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.warn("Sign out error:", e);
     }
-    if (typeof window !== "undefined") {
-      localStorage.removeItem(LOCAL_AUTH_CHOSEN_KEY);
-    }
+    purgeLegacyAndUserLocalCaches(currentUid);
+    resetPrivateWorkspaceState();
+    setFirebaseUser(null);
     setIsAuthenticated(false);
-    setUserProfile(initialUserProfile);
-    setConversations([]);
-    setActiveConversationId(null);
-    setCustomAgents([]);
     setShowAuth(true);
-    addNotification({
-      title: "Signed Out",
-      message: "Select a profile or sign in to continue.",
-      category: "system"
-    });
   };
 
   const deleteAccount = async () => {
-    try {
-      if (auth.currentUser) {
+    const currentUser = auth.currentUser;
+    const uid = currentUser?.uid;
+
+    unsubsRef.current.forEach(unsub => {
+      try {
+        unsub();
+      } catch {}
+    });
+    unsubsRef.current = [];
+    activeUidRef.current = null;
+
+    if (currentUser && uid && currentUser.emailVerified) {
+      const subcollections = ["agents", "memories", "conversations", "notebooks", "notes", "tasks", "activityLogs"];
+      for (const sub of subcollections) {
         try {
-          await deleteUser(auth.currentUser);
-        } catch {
-          await signOut(auth);
+          const snap = await getDocs(query(collection(db, "users", uid, sub), where("ownerId", "==", uid)));
+          for (const d of snap.docs) {
+            await deleteDoc(doc(db, "users", uid, sub, d.id));
+          }
+        } catch (err) {
+          console.warn(`Cleanup skipped for ${sub}:`, err);
         }
       }
-    } catch (e) {
-      console.warn("Account cleanup signout notice:", e);
-    }
-    if (typeof window !== "undefined") {
       try {
-        Object.keys(localStorage).forEach(key => {
-          if (key.startsWith("diptik_")) {
-            localStorage.removeItem(key);
-          }
-        });
-      } catch {}
+        await deleteDoc(doc(db, "users", uid));
+      } catch (err) {
+        console.warn("User doc delete notice:", err);
+      }
     }
+
+    if (currentUser) {
+      try {
+        await deleteUser(currentUser);
+      } catch {
+        await signOut(auth);
+      }
+    }
+
+    purgeLegacyAndUserLocalCaches(uid);
+    resetPrivateWorkspaceState();
+    setFirebaseUser(null);
     setIsAuthenticated(false);
-    setUserProfile(initialUserProfile);
-    setSavedLocalProfiles([initialUserProfile]);
-    setConversations([]);
-    setActiveConversationId(null);
-    setCustomAgents([]);
-    setNotebooks(initialNotebooks);
-    setMemoryItems([]);
-    setActivityLogs([]);
-    setPhoneBridgeConfig(DEFAULT_PHONE_BRIDGE_CONFIG);
     setIsSettingsModalOpen(false);
-    addNotification({
-      title: "Account Data Deleted",
-      message: "Your local workspace data and session have been permanently cleared.",
-      category: "security"
-    });
+    setShowAuth(true);
   };
 
   const toggleOfflineMode = () => {
@@ -935,7 +1075,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsOfflineMode(next);
     addActivityLog({
       command: next ? "Switch to Offline Mode" : "Switch to Online Mode",
-      interpretation: next ? "Activate On-Device Lite 350M engine & SQLite index" : "Connect to cloud Gemini 4 Hydrogen LLM gateway",
+      interpretation: next ? "Activate On-Device Lite 350M engine & local index" : "Connect to cloud Gemini 4 Hydrogen LLM gateway",
       actionPerformed: `Switched AI mode to ${next ? "Offline Lite" : "Online Cloud"}`,
       serviceUsed: next ? "On-Device Engine" : "Cloud LLM Gateway",
       dataAccessed: "System Connection State",
@@ -951,15 +1091,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (updates.defaultEngine) {
       setIsOfflineMode(updates.defaultEngine.includes("Offline"));
     }
-    setSavedLocalProfiles(prev => {
-      const idx = prev.findIndex(p => p.email === merged.email);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = merged;
-        return copy;
-      }
-      return [merged, ...prev];
-    });
 
     if (auth.currentUser && auth.currentUser.emailVerified) {
       const uid = auth.currentUser.uid;
@@ -987,9 +1118,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const togglePermission = (id: string) => {
-    setPermissions(prev =>
-      prev.map(p => (p.id === id ? { ...p, granted: !p.granted } : p))
-    );
+    setPermissions(prev => prev.map(p => (p.id === id ? { ...p, granted: !p.granted } : p)));
   };
 
   const downloadOfflinePackage = (id: string) => {
@@ -1015,6 +1144,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  const persistConversationToFirestore = async (conv: ChatConversation, isNew = false) => {
+    if (conv.isTemporary) return;
+    if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+    const uid = auth.currentUser.uid;
+    const convId = sanitizeDocId(conv.id);
+    const path = `users/${uid}/conversations/${convId}`;
+    const docRef = doc(db, "users", uid, "conversations", convId);
+
+    const basePayload = {
+      ownerId: uid,
+      title: String(conv.title || "Conversation").slice(0, 200),
+      lastMessage: String(conv.lastMessage || "").slice(0, 500),
+      updatedAtLabel: String(conv.updatedAt || "Just now").slice(0, 60),
+      mode: conv.mode || "Ask",
+      isPinned: Boolean(conv.isPinned),
+      isArchived: Boolean(conv.isArchived),
+      messages: sanitizeMessagesForFirestore(conv.messages),
+      updatedAt: serverTimestamp()
+    };
+
+    try {
+      if (isNew) {
+        await setDoc(docRef, {
+          ...basePayload,
+          createdAt: serverTimestamp()
+        });
+      } else {
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          await updateDoc(docRef, basePayload);
+        } else {
+          await setDoc(docRef, {
+            ...basePayload,
+            createdAt: serverTimestamp()
+          });
+        }
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
   const activeConversation = conversations.find(c => c.id === activeConversationId) || null;
 
   const createNewConversation = (mode: AIMode = activeAIMode, title?: string, isTemporary?: boolean) => {
@@ -1030,7 +1201,85 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setConversations(prev => [newConv, ...prev]);
     setActiveConversationId(newId);
+    if (!isTemporary) {
+      void persistConversationToFirestore(newConv, true);
+    }
     return newId;
+  };
+
+  const recordVoiceExchange = (params: {
+    conversationId?: string | null;
+    userText: string;
+    assistantText: string;
+    sources?: { title: string; url: string; credibility: string }[];
+    modelUsed?: string;
+    mode?: AIMode;
+  }): string | null => {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) return null;
+
+    const cleanUser = (params.userText || "").trim();
+    const cleanAi = (params.assistantText || "").trim();
+    if (!cleanUser && !cleanAi) return null;
+
+    const effectiveMode: AIMode = params.mode || (isOfflineMode ? "Offline" : "Ask");
+    const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const newMsgs: ChatMessage[] = [];
+
+    if (cleanUser) {
+      newMsgs.push({
+        id: `msg_vu_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        sender: "user",
+        text: cleanUser,
+        timestamp: nowTime,
+        mode: effectiveMode
+      });
+    }
+    if (cleanAi) {
+      newMsgs.push({
+        id: `msg_va_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        sender: "ai",
+        text: cleanAi,
+        timestamp: nowTime,
+        mode: effectiveMode,
+        modelUsed: params.modelUsed || "Gemini 3.8 Live (Voice)",
+        sources: params.sources && params.sources.length > 0 ? params.sources : undefined
+      });
+    }
+
+    const existing = params.conversationId
+      ? conversationsRef.current.find(c => c.id === params.conversationId)
+      : undefined;
+
+    if (!existing) {
+      const targetId = params.conversationId || `conv_voice_${Date.now()}`;
+      const titleSeed = cleanUser || cleanAi || "Voice Conversation";
+      const title = `Voice: ${titleSeed.slice(0, 32)}${titleSeed.length > 32 ? "..." : ""}`;
+      const summary = (cleanAi || cleanUser).slice(0, 120);
+      const created: ChatConversation = {
+        id: targetId,
+        title,
+        lastMessage: summary,
+        updatedAt: "Just now",
+        mode: effectiveMode,
+        messages: newMsgs
+      };
+      conversationsRef.current = [created, ...conversationsRef.current];
+      setConversations(conversationsRef.current);
+      setActiveConversationId(targetId);
+      void persistConversationToFirestore(created, true);
+      return targetId;
+    }
+
+    const updated: ChatConversation = {
+      ...existing,
+      lastMessage: (cleanAi || cleanUser || existing.lastMessage).slice(0, 120),
+      updatedAt: "Just now",
+      messages: [...existing.messages, ...newMsgs]
+    };
+    conversationsRef.current = conversationsRef.current.map(c => (c.id === existing.id ? updated : c));
+    setConversations(conversationsRef.current);
+    void persistConversationToFirestore(updated, false);
+    return existing.id;
   };
 
   const sendMessage = async (
@@ -1063,46 +1312,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       statusText: effectiveMode === "Offline" ? "Processing locally..." : "Connecting in real time..."
     };
 
-    const existingConv = !options?.newConversation && activeConversationId
-      ? conversations.find(c => c.id === activeConversationId)
-      : undefined;
+    const existingConv =
+      !options?.newConversation && activeConversationId
+        ? conversationsRef.current.find(c => c.id === activeConversationId)
+        : undefined;
     let targetConvId = existingConv?.id;
     const history = (existingConv?.messages || []).map(m => ({
       sender: m.sender,
       text: m.text
     }));
 
+    let workingConv: ChatConversation;
     if (!targetConvId) {
       targetConvId = `conv_${Date.now()}`;
-      const newConv: ChatConversation = {
+      workingConv = {
         id: targetConvId,
         title: text.slice(0, 28) + (text.length > 28 ? "..." : ""),
-        lastMessage: text,
+        lastMessage: text.slice(0, 120),
         updatedAt: "Just now",
         mode: effectiveMode,
         messages: [userMsg, placeholderAiMsg]
       };
-      setConversations(prev => [newConv, ...prev]);
+      setConversations(prev => [workingConv, ...prev]);
       setActiveConversationId(targetConvId);
     } else {
-      setConversations(prev =>
-        prev.map(c => {
-          if (c.id === targetConvId) {
-            const newTitle = c.title.includes("Conversation") ? text.slice(0, 28) + (text.length > 28 ? "..." : "") : c.title;
-            return {
-              ...c,
-              title: newTitle,
-              lastMessage: text,
-              updatedAt: "Just now",
-              messages: [...c.messages, userMsg, placeholderAiMsg]
-            };
-          }
-          return c;
-        })
-      );
+      const newTitle = existingConv!.title.includes("Conversation")
+        ? text.slice(0, 28) + (text.length > 28 ? "..." : "")
+        : existingConv!.title;
+      workingConv = {
+        ...existingConv!,
+        title: newTitle,
+        lastMessage: text.slice(0, 120),
+        updatedAt: "Just now",
+        messages: [...existingConv!.messages, userMsg, placeholderAiMsg]
+      };
+      setConversations(prev => prev.map(c => (c.id === targetConvId ? workingConv : c)));
     }
-
-    const targetConv = existingConv;
 
     const updateAiMsg = (updater: (m: ChatMessage) => ChatMessage) => {
       setConversations(prev =>
@@ -1110,12 +1355,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (c.id !== targetConvId) return c;
           const updatedMsgs = c.messages.map(m => (m.id === aiMsgId ? updater(m) : m));
           const latestAi = updatedMsgs.find(m => m.id === aiMsgId);
-          return {
+          const nextConv: ChatConversation = {
             ...c,
             lastMessage: latestAi?.text ? latestAi.text.slice(0, 60) + (latestAi.text.length > 60 ? "..." : "") : c.lastMessage,
             updatedAt: "Just now",
             messages: updatedMsgs
           };
+          workingConv = nextConv;
+          return nextConv;
         })
       );
     };
@@ -1144,20 +1391,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           activeAgent: activeChatAgent,
           clientDateTime,
           timezone,
-          memories: targetConv?.isTemporary ? [] : memoryItems.slice(0, 5).map(m => ({ title: m.title, value: m.value }))
+          memories: existingConv?.isTemporary ? [] : memoryItems.slice(0, 5).map(m => ({ title: m.title, value: m.value }))
         },
         {
-          onStatus: (status) => {
+          onStatus: status => {
             updateAiMsg(m => ({ ...m, statusText: status }));
           },
-          onChunk: (delta) => {
+          onChunk: delta => {
             updateAiMsg(m => ({
               ...m,
               text: m.text + delta,
               statusText: undefined
             }));
           },
-          onDone: (meta) => {
+          onDone: meta => {
             updateAiMsg(m => ({
               ...m,
               isStreaming: false,
@@ -1175,12 +1422,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 : undefined
             }));
 
+            // Persist finalized conversation to Firestore for this user only
+            setTimeout(() => {
+              const latest = conversationsRef.current.find(c => c.id === targetConvId) || workingConv;
+              if (latest && !latest.isTemporary) {
+                void persistConversationToFirestore(latest, !existingConv);
+              }
+            }, 0);
+
             addActivityLog({
               command: text,
               interpretation: meta.action ? `Phone command: ${meta.action.details}` : `AI Chat in ${effectiveMode} mode`,
               actionPerformed: meta.action ? "Prepared phone action draft" : "Streamed real-time AI response",
               serviceUsed: meta.modelUsed || "Gemini 4 Hydrogen",
-              dataAccessed: meta.action ? meta.action.app : (meta.sources?.length ? "Live Web + Context" : "Conversation Context"),
+              dataAccessed: meta.action ? meta.action.app : meta.sources?.length ? "Live Web + Context" : "Conversation Context",
               permissionUsed: meta.action ? "Level 2 Safeguard" : "Level 1 Safe",
               result: "Success",
               confirmationLevel: meta.confirmationLevel
@@ -1200,7 +1455,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               });
             }
           },
-          onError: (errMsg) => {
+          onError: errMsg => {
             updateAiMsg(m => ({
               ...m,
               isStreaming: false,
@@ -1209,6 +1464,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 ? `${m.text}\n\n_(Stream interrupted: ${errMsg})_`
                 : `Unable to get a response right now: ${errMsg}. Please try sending again.`
             }));
+            setTimeout(() => {
+              const latest = conversationsRef.current.find(c => c.id === targetConvId) || workingConv;
+              if (latest && !latest.isTemporary) {
+                void persistConversationToFirestore(latest, !existingConv);
+              }
+            }, 0);
           }
         },
         options?.signal
@@ -1229,6 +1490,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           text: m.text || `Connection error: ${err?.message || "Please check your connection and try again."}`
         }));
       }
+      setTimeout(() => {
+        const latest = conversationsRef.current.find(c => c.id === targetConvId) || workingConv;
+        if (latest && !latest.isTemporary) {
+          void persistConversationToFirestore(latest, !existingConv);
+        }
+      }, 0);
     }
   };
 
@@ -1238,27 +1505,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const remaining = conversations.filter(c => c.id !== id);
       setActiveConversationId(remaining.length > 0 ? remaining[0].id : null);
     }
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const convId = sanitizeDocId(id);
+      const path = `users/${uid}/conversations/${convId}`;
+      deleteDoc(doc(db, "users", uid, "conversations", convId)).catch(err =>
+        handleFirestoreError(err, OperationType.DELETE, path)
+      );
+    }
   };
 
   const togglePinConversation = (id: string) => {
+    let updatedConv: ChatConversation | undefined;
     setConversations(prev =>
-      prev.map(c => (c.id === id ? { ...c, isPinned: !c.isPinned } : c))
+      prev.map(c => {
+        if (c.id === id) {
+          updatedConv = { ...c, isPinned: !c.isPinned };
+          return updatedConv;
+        }
+        return c;
+      })
     );
+    if (updatedConv && !updatedConv.isTemporary) {
+      void persistConversationToFirestore(updatedConv, false);
+    }
   };
 
   const addAgentTemplate = async (agent: AgentTemplate) => {
     const newAgent: AgentTemplate = { ...agent, isCustom: true };
-    const updated = [newAgent, ...customAgents];
-    setCustomAgents(updated);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(LOCAL_CUSTOM_AGENTS_KEY, JSON.stringify(updated));
-      } catch {}
-    }
+    setCustomAgents(prev => [newAgent, ...prev]);
 
     if (auth.currentUser && auth.currentUser.emailVerified) {
       const uid = auth.currentUser.uid;
-      const agentId = newAgent.id.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const agentId = sanitizeDocId(newAgent.id);
       const path = `users/${uid}/agents/${agentId}`;
       try {
         const userRef = doc(db, "users", uid);
@@ -1279,7 +1558,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           description: (newAgent.description || "").slice(0, 300),
           goal: (newAgent.goal || "").slice(0, 300),
           tools: (newAgent.tools || []).slice(0, 10).map(t => String(t).slice(0, 60)),
-          memory: (newAgent.memory || "Long-term memory").slice(0, 150),
+          memory: (newAgent.memory || "Private memory").slice(0, 150),
           category: validCategories.includes(newAgent.category) ? newAgent.category : "Productivity",
           instructions: (newAgent.instructions || "").slice(0, 1000),
           voiceName: validVoices.includes(newAgent.voiceName || "Zephyr") ? newAgent.voiceName || "Zephyr" : "Zephyr",
@@ -1293,16 +1572,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteAgentTemplate = async (id: string) => {
-    const updated = customAgents.filter(a => a.id !== id);
-    setCustomAgents(updated);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(LOCAL_CUSTOM_AGENTS_KEY, JSON.stringify(updated));
-      } catch {}
-    }
+    setCustomAgents(prev => prev.filter(a => a.id !== id));
     if (auth.currentUser && auth.currentUser.emailVerified) {
       const uid = auth.currentUser.uid;
-      const agentId = id.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const agentId = sanitizeDocId(id);
       const path = `users/${uid}/agents/${agentId}`;
       try {
         await deleteDoc(doc(db, "users", uid, "agents", agentId));
@@ -1384,8 +1657,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addNote = (note: Partial<NoteItem>) => {
+    const id = `note_${Date.now()}`;
     const newNote: NoteItem = {
-      id: `note_${Date.now()}`,
+      id,
       title: note.title || "Untitled Note",
       content: note.content || "",
       tags: note.tags || ["#general"],
@@ -1395,19 +1669,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       checklist: note.checklist || []
     };
     setNotes(prev => [newNote, ...prev]);
+
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const noteId = sanitizeDocId(id);
+      const path = `users/${uid}/notes/${noteId}`;
+      setDoc(doc(db, "users", uid, "notes", noteId), {
+        ownerId: uid,
+        title: newNote.title.slice(0, 200),
+        content: newNote.content.slice(0, 10000),
+        tags: newNote.tags.slice(0, 10).map(t => String(t).slice(0, 40)),
+        createdAtLabel: newNote.createdAt.slice(0, 60),
+        updatedAtLabel: newNote.updatedAt.slice(0, 60),
+        isPinned: newNote.isPinned,
+        checklist: newNote.checklist.slice(0, 50),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }).catch(err => handleFirestoreError(err, OperationType.CREATE, path));
+    }
   };
 
   const updateNote = (id: string, updates: Partial<NoteItem>) => {
-    setNotes(prev => prev.map(n => (n.id === id ? { ...n, ...updates, updatedAt: "Just now" } : n)));
+    let updated: NoteItem | undefined;
+    setNotes(prev =>
+      prev.map(n => {
+        if (n.id === id) {
+          updated = { ...n, ...updates, updatedAt: "Just now" };
+          return updated;
+        }
+        return n;
+      })
+    );
+    if (updated && auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const noteId = sanitizeDocId(id);
+      const path = `users/${uid}/notes/${noteId}`;
+      updateDoc(doc(db, "users", uid, "notes", noteId), {
+        ownerId: uid,
+        title: updated.title.slice(0, 200),
+        content: updated.content.slice(0, 10000),
+        tags: updated.tags.slice(0, 10).map(t => String(t).slice(0, 40)),
+        createdAtLabel: updated.createdAt.slice(0, 60),
+        updatedAtLabel: updated.updatedAt.slice(0, 60),
+        isPinned: updated.isPinned,
+        checklist: updated.checklist.slice(0, 50),
+        updatedAt: serverTimestamp()
+      }).catch(err => handleFirestoreError(err, OperationType.UPDATE, path));
+    }
   };
 
   const deleteNote = (id: string) => {
     setNotes(prev => prev.filter(n => n.id !== id));
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const noteId = sanitizeDocId(id);
+      const path = `users/${uid}/notes/${noteId}`;
+      deleteDoc(doc(db, "users", uid, "notes", noteId)).catch(err =>
+        handleFirestoreError(err, OperationType.DELETE, path)
+      );
+    }
   };
 
   const addNotebook = (nb: Partial<NotebookItem>): NotebookItem => {
+    const id = `nb_${Date.now()}`;
     const newNb: NotebookItem = {
-      id: `nb_${Date.now()}`,
+      id,
       title: nb.title?.trim() || "Untitled Notebook",
       description: nb.description?.trim() || "Workspace notes and research synthesis.",
       content: nb.content || `# ${nb.title?.trim() || "Untitled Notebook"}\n\nStart writing notes, ideas, or ask DiptiK AI 3 to synthesize your sources.`,
@@ -1416,13 +1742,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pinned: nb.pinned ?? false
     };
     setNotebooks(prev => [newNb, ...prev]);
+
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const nbId = sanitizeDocId(id);
+      const path = `users/${uid}/notebooks/${nbId}`;
+      setDoc(doc(db, "users", uid, "notebooks", nbId), {
+        ownerId: uid,
+        title: newNb.title.slice(0, 200),
+        description: newNb.description.slice(0, 500),
+        content: newNb.content.slice(0, 25000),
+        tags: newNb.tags.slice(0, 10).map(t => String(t).slice(0, 40)),
+        updatedAtLabel: newNb.updatedAt.slice(0, 60),
+        pinned: Boolean(newNb.pinned),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }).catch(err => handleFirestoreError(err, OperationType.CREATE, path));
+    }
     return newNb;
   };
 
   const updateNotebook = (id: string, updates: Partial<NotebookItem>) => {
+    let updated: NotebookItem | undefined;
     setNotebooks(prev =>
-      prev.map(nb => (nb.id === id ? { ...nb, ...updates, updatedAt: "Just now" } : nb))
+      prev.map(nb => {
+        if (nb.id === id) {
+          updated = { ...nb, ...updates, updatedAt: "Just now" };
+          return updated;
+        }
+        return nb;
+      })
     );
+    if (updated && auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const nbId = sanitizeDocId(id);
+      const path = `users/${uid}/notebooks/${nbId}`;
+      updateDoc(doc(db, "users", uid, "notebooks", nbId), {
+        ownerId: uid,
+        title: updated.title.slice(0, 200),
+        description: updated.description.slice(0, 500),
+        content: updated.content.slice(0, 25000),
+        tags: updated.tags.slice(0, 10).map(t => String(t).slice(0, 40)),
+        updatedAtLabel: updated.updatedAt.slice(0, 60),
+        pinned: Boolean(updated.pinned),
+        updatedAt: serverTimestamp()
+      }).catch(err => handleFirestoreError(err, OperationType.UPDATE, path));
+    }
   };
 
   const deleteNotebook = (id: string) => {
@@ -1430,11 +1795,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (activeNotebookId === id) {
       setActiveNotebookId(null);
     }
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const nbId = sanitizeDocId(id);
+      const path = `users/${uid}/notebooks/${nbId}`;
+      deleteDoc(doc(db, "users", uid, "notebooks", nbId)).catch(err =>
+        handleFirestoreError(err, OperationType.DELETE, path)
+      );
+    }
   };
 
   const addTask = (task: Partial<TaskItem>) => {
+    const id = `task_${Date.now()}`;
     const newTask: TaskItem = {
-      id: `task_${Date.now()}`,
+      id,
       title: task.title || "New Task",
       dueDate: task.dueDate || "Today",
       time: task.time || "12:00 PM",
@@ -1444,25 +1818,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       reminderSet: !!task.reminderSet
     };
     setTasks(prev => [newTask, ...prev]);
+
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const taskId = sanitizeDocId(id);
+      const path = `users/${uid}/tasks/${taskId}`;
+      const payload: Record<string, any> = {
+        ownerId: uid,
+        title: newTask.title.slice(0, 200),
+        dueDate: newTask.dueDate.slice(0, 60),
+        time: newTask.time.slice(0, 40),
+        priority: newTask.priority,
+        status: newTask.status,
+        reminderSet: Boolean(newTask.reminderSet),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      if (newTask.aiSuggestion) {
+        payload.aiSuggestion = newTask.aiSuggestion.slice(0, 500);
+      }
+      setDoc(doc(db, "users", uid, "tasks", taskId), payload).catch(err =>
+        handleFirestoreError(err, OperationType.CREATE, path)
+      );
+    }
   };
 
   const toggleTaskCompletion = (id: string) => {
+    let updated: TaskItem | undefined;
     setTasks(prev =>
-      prev.map(t => (t.id === id ? { ...t, status: t.status === "Completed" ? "Today" : "Completed" } : t))
+      prev.map(t => {
+        if (t.id === id) {
+          updated = { ...t, status: t.status === "Completed" ? "Today" : "Completed" };
+          return updated;
+        }
+        return t;
+      })
     );
+    if (updated && auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const taskId = sanitizeDocId(id);
+      const path = `users/${uid}/tasks/${taskId}`;
+      updateDoc(doc(db, "users", uid, "tasks", taskId), {
+        ownerId: uid,
+        title: updated.title.slice(0, 200),
+        dueDate: updated.dueDate.slice(0, 60),
+        time: updated.time.slice(0, 40),
+        priority: updated.priority,
+        status: updated.status,
+        reminderSet: Boolean(updated.reminderSet),
+        ...(updated.aiSuggestion ? { aiSuggestion: updated.aiSuggestion.slice(0, 500) } : {}),
+        updatedAt: serverTimestamp()
+      }).catch(err => handleFirestoreError(err, OperationType.UPDATE, path));
+    }
   };
 
   const deleteTask = (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const taskId = sanitizeDocId(id);
+      const path = `users/${uid}/tasks/${taskId}`;
+      deleteDoc(doc(db, "users", uid, "tasks", taskId)).catch(err =>
+        handleFirestoreError(err, OperationType.DELETE, path)
+      );
+    }
   };
 
   const addActivityLog = (log: Omit<ActivityLogItem, "id" | "timestamp">) => {
+    const id = `act_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+    const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const newLog: ActivityLogItem = {
       ...log,
-      id: `act_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      id,
+      timestamp
     };
     setActivityLogs(prev => [newLog, ...prev]);
+
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const logId = sanitizeDocId(id);
+      const path = `users/${uid}/activityLogs/${logId}`;
+      setDoc(doc(db, "users", uid, "activityLogs", logId), {
+        ownerId: uid,
+        command: String(log.command || "").slice(0, 300),
+        interpretation: String(log.interpretation || "").slice(0, 500),
+        actionPerformed: String(log.actionPerformed || "").slice(0, 500),
+        serviceUsed: String(log.serviceUsed || "").slice(0, 120),
+        dataAccessed: String(log.dataAccessed || "").slice(0, 150),
+        permissionUsed: String(log.permissionUsed || "").slice(0, 120),
+        result: log.result,
+        timestampLabel: timestamp.slice(0, 60),
+        confirmationLevel: Math.min(3, Math.max(1, Math.round(log.confirmationLevel || 1))),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }).catch(err => handleFirestoreError(err, OperationType.CREATE, path));
+    }
   };
 
   const addMemoryItem = async (category: MemoryItem["category"], title: string, value: string) => {
@@ -1479,9 +1929,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (auth.currentUser && auth.currentUser.emailVerified) {
       const uid = auth.currentUser.uid;
-      const path = `users/${uid}/memories/${id}`;
+      const memId = sanitizeDocId(id);
+      const path = `users/${uid}/memories/${memId}`;
       try {
-        await setDoc(doc(db, "users", uid, "memories", id), {
+        await setDoc(doc(db, "users", uid, "memories", memId), {
           ownerId: uid,
           category: category.slice(0, 40),
           title: title.slice(0, 160),
@@ -1499,9 +1950,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMemoryItems(prev => prev.filter(m => m.id !== id));
     if (auth.currentUser && auth.currentUser.emailVerified) {
       const uid = auth.currentUser.uid;
-      const path = `users/${uid}/memories/${id}`;
+      const memId = sanitizeDocId(id);
+      const path = `users/${uid}/memories/${memId}`;
       try {
-        await deleteDoc(doc(db, "users", uid, "memories", id));
+        await deleteDoc(doc(db, "users", uid, "memories", memId));
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, path);
       }
@@ -1509,7 +1961,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const clearAllMemory = () => {
+    const toDelete = [...memoryItems];
     setMemoryItems([]);
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      toDelete.forEach(item => {
+        const memId = sanitizeDocId(item.id);
+        deleteDoc(doc(db, "users", uid, "memories", memId)).catch(err =>
+          handleFirestoreError(err, OperationType.DELETE, `users/${uid}/memories/${memId}`)
+        );
+      });
+    }
     addNotification({
       title: "Memory Cleared",
       message: "All stored personal memories and user preferences have been purged.",
@@ -1544,7 +2006,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const clearActivityLogs = () => {
+    const toDelete = [...activityLogs];
     setActivityLogs([]);
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      toDelete.forEach(item => {
+        const logId = sanitizeDocId(item.id);
+        deleteDoc(doc(db, "users", uid, "activityLogs", logId)).catch(err =>
+          handleFirestoreError(err, OperationType.DELETE, `users/${uid}/activityLogs/${logId}`)
+        );
+      });
+    }
   };
 
   const addUserFact = async (category: any, val: string) => {
@@ -1600,11 +2072,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         signInWithGoogle,
         signInWithEmail,
         registerWithEmail,
+        reloadAuthUser,
+        resendVerificationEmail,
         sendPasswordReset,
-        createCustomLocalProfile,
-        useDefaultProfilePreset,
-        savedLocalProfiles,
-        switchLocalProfile,
         logout,
         deleteAccount,
         userProfile,
@@ -1622,6 +2092,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveChatAgent,
         createNewConversation,
         sendMessage,
+        recordVoiceExchange,
         deleteConversation,
         togglePinConversation,
         agentTemplates,

@@ -92,6 +92,7 @@ export function speakWithAccent(
   options?: {
     accent?: VoiceAccent;
     rate?: number;
+    queue?: boolean;
     onStart?: () => void;
     onEnd?: () => void;
   }
@@ -101,7 +102,9 @@ export function speakWithAccent(
   if (!cleanText) return;
 
   const accent = options?.accent || loadVoiceAccent();
-  window.speechSynthesis.cancel();
+  if (!options?.queue) {
+    window.speechSynthesis.cancel();
+  }
 
   const utter = new SpeechSynthesisUtterance(cleanText);
   utter.lang = accent;
