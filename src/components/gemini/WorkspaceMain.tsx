@@ -18,22 +18,18 @@ import {
   Trash2,
   NotebookPen,
   Sparkles,
-  Search,
-  Image as ImageIcon,
-  Scan,
-  Upload,
-  Video,
   Mic,
   Bot,
-  Pin,
   FileText,
-  ArrowRight,
   RefreshCw,
   CheckCircle2
 } from "lucide-react";
-import { analyzeImageVision, runAutomationTest } from "../../services/api";
+import { runAutomationTest } from "../../services/api";
 import { VoicePersonaName } from "../../types";
 import { loadVoiceAccent, speakWithAccent } from "../../lib/voice";
+import { LibraryView } from "../workspace/LibraryView";
+import { StudyTableView } from "../workspace/StudyTableView";
+import { CodersView } from "../workspace/CodersView";
 
 const PROMPT_SUGGESTIONS = [
   {
@@ -142,9 +138,6 @@ export const WorkspaceMain: React.FC<WorkspaceMainProps> = ({ onOpenNewNotebook 
     updateNotebook,
     deleteNotebook,
     addNotebook,
-    knowledge,
-    deleteKnowledgeItem,
-    notes,
     tasks,
     toggleTaskCompletion,
     automations,
@@ -156,12 +149,8 @@ export const WorkspaceMain: React.FC<WorkspaceMainProps> = ({ onOpenNewNotebook 
     deleteAgentTemplate,
     setActiveChatAgent,
     openVoiceWithAgent,
-    setIsResearchModalOpen,
-    setIsVisionModalOpen,
-    setIsNotesModalOpen,
     setIsPhoneActionsModalOpen,
     setActiveCommandConfirmation,
-    addActivityLog,
     addNotification
   } = useApp();
 
@@ -169,12 +158,6 @@ export const WorkspaceMain: React.FC<WorkspaceMainProps> = ({ onOpenNewNotebook 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Images / Vision studio local state
-  const [visionPrompt, setVisionPrompt] = useState("Extract key text and summarize visual structure.");
-  const [visionImage, setVisionImage] = useState<string | null>(null);
-  const [visionResult, setVisionResult] = useState<any>(null);
-  const [visionLoading, setVisionLoading] = useState(false);
 
   // Scheduled automation quick-add state
   const [newAutoName, setNewAutoName] = useState("");
@@ -187,9 +170,6 @@ export const WorkspaceMain: React.FC<WorkspaceMainProps> = ({ onOpenNewNotebook 
   const [newAgentName, setNewAgentName] = useState("");
   const [newAgentGoal, setNewAgentGoal] = useState("");
   const [newAgentInstructions, setNewAgentInstructions] = useState("");
-
-  // Library quick filter
-  const [libraryFilter, setLibraryFilter] = useState("");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -618,229 +598,21 @@ export const WorkspaceMain: React.FC<WorkspaceMainProps> = ({ onOpenNewNotebook 
   }
 
   // ------------------------------------------------------------------
-  // VIEW 5: LIBRARY (Knowledge, Notes & Deep Research)
+  // VIEW 5: LIBRARY (Dictionary, Books & Slides, Notes, Papers, Bookmarks + PDF Reader)
   // ------------------------------------------------------------------
   if (activeWorkspaceView === "library") {
-    const filteredKnowledge = knowledge.filter(
-      k =>
-        !libraryFilter.trim() ||
-        k.name.toLowerCase().includes(libraryFilter.toLowerCase()) ||
-        k.summary.toLowerCase().includes(libraryFilter.toLowerCase())
-    );
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto gemini-scroll px-4 sm:px-8 pb-12">
-        <div className="max-w-5xl mx-auto space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-white/[0.08] pb-4">
-            <div>
-              <h1 className="font-display text-2xl font-semibold text-slate-900 dark:text-white">Library</h1>
-              <p className="text-sm text-slate-500 dark:text-[#94a3b8] mt-1">
-                Indexed documents, saved notes, and deep research reports.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsResearchModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl bg-[#0072FF] hover:bg-[#005ce6] text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>Deep Research</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsNotesModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl bg-white dark:bg-[#181c2b] hover:bg-slate-100 dark:hover:bg-[#1f2437] border border-slate-200 dark:border-white/[0.08] text-slate-800 dark:text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <FileText className="w-3.5 h-3.5 text-[#0072FF] dark:text-[#00E5FF]" />
-                <span>Notes & Tasks</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="relative max-w-md">
-            <Search className="w-4 h-4 text-slate-400 dark:text-[#64748b] absolute left-3.5 top-2.5" />
-            <input
-              type="text"
-              value={libraryFilter}
-              onChange={e => setLibraryFilter(e.target.value)}
-              placeholder="Search knowledge documents..."
-              className="w-full bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] focus:border-[#0072FF] rounded-xl pl-10 pr-4 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-[#64748b] focus:outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredKnowledge.map(item => (
-              <div
-                key={item.id}
-                className="p-5 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] space-y-3 text-left shadow-xs dark:shadow-none"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">{item.name}</h3>
-                    <p className="text-xs text-slate-400 dark:text-[#64748b] mt-0.5">
-                      {item.type} · {item.size} · {item.uploadDate}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => deleteKnowledgeItem(item.id)}
-                    aria-label="Delete item"
-                    className="p-1.5 rounded-lg text-slate-400 dark:text-[#64748b] hover:text-red-500 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-white/[0.06] cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-[#cbd5e1] leading-relaxed">{item.summary}</p>
-                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-white/[0.06]">
-                  <span className="text-[11px] text-slate-400 dark:text-[#64748b]">{item.topics.join(" · ")}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSendPrompt(`Summarize and extract key insights from "${item.name}": ${item.content || item.summary}`)
-                    }
-                    className="text-xs text-[#0072FF] dark:text-[#00E5FF] hover:text-slate-900 dark:hover:text-white font-medium flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>Ask DiptiK AI 3</span>
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="pt-2">
-            <h2 className="font-display text-sm font-medium text-slate-500 dark:text-[#94a3b8] mb-3">Quick Notes ({notes.length})</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {notes.map(note => (
-                <div
-                  key={note.id}
-                  onClick={() => setIsNotesModalOpen(true)}
-                  className="p-4 rounded-xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-white/[0.16] transition-colors cursor-pointer text-left"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-900 dark:text-white truncate">{note.title}</span>
-                    {note.isPinned && <Pin className="w-3.5 h-3.5 text-[#0072FF] dark:text-[#00E5FF]" />}
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-[#94a3b8] mt-1 line-clamp-2">{note.content}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+      <LibraryView
+        onAskAI={prompt => handleSendPrompt(prompt, undefined, !isOfflineMode, "Research")}
+      />
     );
   }
 
   // ------------------------------------------------------------------
-  // VIEW 6: IMAGES (Vision & Visual Analysis Studio)
+  // VIEW 6: STUDY TABLE (Academic & IELTS)
   // ------------------------------------------------------------------
-  if (activeWorkspaceView === "images") {
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        setVisionImage(reader.result as string);
-        setVisionResult(null);
-      };
-      reader.readAsDataURL(file);
-    };
-
-    const handleRunVision = async () => {
-      setVisionLoading(true);
-      try {
-        const res = await analyzeImageVision("Scan Document", visionPrompt, visionImage || undefined);
-        setVisionResult(res);
-        addActivityLog({
-          command: "Vision Image Analysis",
-          interpretation: visionPrompt,
-          actionPerformed: "Analyzed visual input via Vision studio",
-          serviceUsed: "Gemini Vision OCR",
-          dataAccessed: "Uploaded Image",
-          permissionUsed: "Camera & Vision Permission",
-          result: "Success",
-          confirmationLevel: 1
-        });
-      } finally {
-        setVisionLoading(false);
-      }
-    };
-
-    return (
-      <div className="flex-1 min-h-0 overflow-y-auto gemini-scroll px-4 sm:px-8 pb-12">
-        <div className="max-w-4xl mx-auto space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 dark:border-white/[0.08] pb-4">
-            <div>
-              <h1 className="font-display text-2xl font-semibold text-slate-900 dark:text-white">Images & Vision</h1>
-              <p className="text-sm text-slate-500 dark:text-[#94a3b8] mt-1">
-                Analyze images, scan documents with OCR, or brainstorm cover art concepts.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsVisionModalOpen(true)}
-              className="px-4 py-2 rounded-xl bg-[#0072FF] hover:bg-[#005ce6] text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-            >
-              <Scan className="w-4 h-4" />
-              <span>Open Full OCR Scanner</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="p-5 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] space-y-4 text-left shadow-xs dark:shadow-none">
-              <label className="block border border-dashed border-slate-300 dark:border-white/[0.15] hover:border-[#0072FF] rounded-xl p-6 text-center cursor-pointer transition-colors">
-                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                {visionImage ? (
-                  <img src={visionImage} alt="Selected preview" className="max-h-52 mx-auto rounded-lg object-contain" />
-                ) : (
-                  <div className="space-y-2">
-                    <Upload className="w-6 h-6 text-[#0072FF] dark:text-[#00E5FF] mx-auto" />
-                    <p className="text-sm text-slate-900 dark:text-white font-medium">Upload an image to analyze</p>
-                    <p className="text-xs text-slate-400 dark:text-[#64748b]">PNG, JPG, or document snapshot</p>
-                  </div>
-                )}
-              </label>
-
-              <input
-                type="text"
-                value={visionPrompt}
-                onChange={e => setVisionPrompt(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-[#181c2b] border border-slate-200 dark:border-white/[0.08] focus:border-[#0072FF] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none"
-                placeholder="What should DiptiK AI 3 inspect in this image?"
-              />
-
-              <button
-                type="button"
-                onClick={handleRunVision}
-                disabled={visionLoading}
-                className="w-full py-2.5 rounded-xl bg-[#0072FF] hover:bg-[#005ce6] disabled:opacity-50 text-white text-xs font-medium flex items-center justify-center gap-2 cursor-pointer"
-              >
-                {visionLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
-                <span>{visionLoading ? "Analyzing..." : "Analyze Visual Input"}</span>
-              </button>
-            </div>
-
-            <div className="p-5 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] text-left space-y-3 shadow-xs dark:shadow-none">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Analysis Output</h3>
-              {visionResult ? (
-                <div className="space-y-3 text-xs text-slate-600 dark:text-[#cbd5e1] leading-relaxed">
-                  <div>{renderFormattedText(visionResult.analysis)}</div>
-                  {visionResult.extractedText && (
-                    <div className="p-3 rounded-xl bg-slate-100 dark:bg-[#181c2b] border border-slate-200 dark:border-white/[0.06] font-mono text-[11px] text-[#0072FF] dark:text-[#00E5FF]">
-                      {visionResult.extractedText}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-slate-400 dark:text-[#64748b] py-8">
-                  Upload an image and click Analyze Visual Input to extract text, objects, and insights.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  if (activeWorkspaceView === "study-table") {
+    return <StudyTableView />;
   }
 
   // ------------------------------------------------------------------
@@ -1210,65 +982,7 @@ export const WorkspaceMain: React.FC<WorkspaceMainProps> = ({ onOpenNewNotebook 
   }
 
   // ------------------------------------------------------------------
-  // VIEW 9: VIDEOS (Live Voice & Multimodal Media Assistant)
+  // VIEW 9: CODERS (Tools Directory & CP Learning Hub)
   // ------------------------------------------------------------------
-  return (
-    <div className="flex-1 min-h-0 overflow-y-auto gemini-scroll px-4 sm:px-8 pb-12">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="border-b border-slate-200 dark:border-white/[0.08] pb-4 text-left">
-          <h1 className="font-display text-2xl font-semibold text-slate-900 dark:text-white">Videos & Live Media</h1>
-          <p className="text-sm text-slate-500 dark:text-[#94a3b8] mt-1">
-            Launch real-time voice sessions or generate storyboards, video scripts, and shot lists.
-          </p>
-        </div>
-
-        <div className="p-6 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-left shadow-xs dark:shadow-none">
-          <div className="space-y-1">
-            <h2 className="font-display text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-              <Video className="w-5 h-5 text-[#0072FF] dark:text-[#00E5FF]" />
-              <span>Real-Time DiptiK Live Session</span>
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-[#94a3b8]">
-              Interactive low-latency 16kHz voice conversation using {userProfile.voiceName || "Zephyr"} persona.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => openVoiceWithAgent(null)}
-            className="px-5 py-2.5 rounded-full bg-[#0072FF] hover:bg-[#005ce6] text-white text-xs font-medium flex items-center gap-2 cursor-pointer shrink-0"
-          >
-            <Mic className="w-4 h-4" />
-            <span>Start Live Audio</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
-          {[
-            {
-              title: "Product Launch Video Script",
-              prompt: "Write a 60-second product launch video script with scene-by-scene visual cues and voiceover."
-            },
-            {
-              title: "YouTube Tutorial Outline",
-              prompt: "Create a clear 5-chapter tutorial video outline for building a hybrid mobile AI assistant."
-            },
-            {
-              title: "Storyboard & Camera Angles",
-              prompt: "Design a 6-frame visual storyboard for an agricultural technology explainer video."
-            }
-          ].map((preset, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => handleSendPrompt(preset.prompt, undefined, true, "Create")}
-              className="p-5 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] hover:border-[#0072FF]/50 transition-colors text-left space-y-2 cursor-pointer shadow-xs dark:shadow-none"
-            >
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{preset.title}</h3>
-              <p className="text-xs text-slate-500 dark:text-[#94a3b8] leading-relaxed">{preset.prompt}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  return <CodersView />;
 };

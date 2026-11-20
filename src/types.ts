@@ -273,10 +273,10 @@ export interface NotebookItem {
 export type WorkspaceView =
   | "chat"
   | "library"
-  | "images"
+  | "study-table"
   | "scheduled"
   | "customize"
-  | "videos"
+  | "coders"
   | "notebook"
   | "all-notebooks";
 
@@ -294,4 +294,98 @@ export interface PhoneBridgeConfig {
   city: string;
   biometricCredentialId?: string;
   lastBriefingSentAt?: string;
+}
+
+export type LibraryFolder =
+  | "Dictionary"
+  | "Books & Slides"
+  | "Notes"
+  | "Papers"
+  | "Bookmarks";
+
+export interface LibraryDocumentItem {
+  id: string;
+  title: string;
+  folder: LibraryFolder;
+  fileType: "PDF" | "Slides" | "Image" | "Text" | "Bookmark";
+  mimeType: string;
+  sizeBytes: number;
+  sizeLabel: string;
+  url?: string;
+  notes: string;
+  localBlobId?: string;
+  textPreview?: string;
+  uploadedAt: string;
+  updatedAt: string;
+}
+
+export interface AcademicCourseGrade {
+  id: string;
+  semester: string;
+  code: string;
+  title: string;
+  credits: number;
+  letterGrade: string;
+  gradePoint: number;
+}
+
+export interface SyllabusUnitItem {
+  id: string;
+  courseName: string;
+  moduleTitle: string;
+  completedUnits: number;
+  totalUnits: number;
+  examDate: string;
+}
+
+export interface StudyCheckItem {
+  id: string;
+  title: string;
+  category: string;
+  dueDate: string;
+  completed: boolean;
+}
+
+export interface AcademicLinkItem {
+  id: string;
+  title: string;
+  url: string;
+  category: string;
+}
+
+export interface IeltsPracticeLog {
+  id: string;
+  date: string;
+  skill: "Listening" | "Reading" | "Writing" | "Speaking";
+  score: number;
+  topic: string;
+}
+
+export interface IeltsVocabNote {
+  id: string;
+  term: string;
+  category: "Vocabulary" | "Cue Card";
+  meaningOrNotes: string;
+  example: string;
+}
+
+export interface StudyWorkspaceState {
+  gpaScale: "4.0" | "5.0";
+  gpaCourses: AcademicCourseGrade[];
+  syllabusItems: SyllabusUnitItem[];
+  academicChecklist: StudyCheckItem[];
+  academicLinks: AcademicLinkItem[];
+  pomodoroMinutesTotal: number;
+  ieltsTargetBand: number;
+  ieltsScores: {
+    listening: number;
+    reading: number;
+    writing: number;
+    speaking: number;
+  };
+  ieltsPracticeLogs: IeltsPracticeLog[];
+  ieltsVocabNotes: IeltsVocabNote[];
+  ieltsChecklist: StudyCheckItem[];
+  codersBookmarkedIds: string[];
+  codersCompletedIds: string[];
 }

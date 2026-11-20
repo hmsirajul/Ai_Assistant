@@ -5,10 +5,10 @@ import {
   PanelLeftClose,
   Plus,
   BookOpen,
-  Image as ImageIcon,
+  GraduationCap,
   CalendarClock,
   SlidersHorizontal,
-  Video,
+  Code2,
   ChevronDown,
   ChevronRight,
   NotebookPen,
@@ -84,10 +84,10 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
 
   const navItems: { id: WorkspaceView; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }> }[] = [
     { id: "library", label: "Library", icon: BookOpen },
-    { id: "images", label: "Images", icon: ImageIcon },
+    { id: "study-table", label: "Study Table", icon: GraduationCap },
     { id: "scheduled", label: "Scheduled", icon: CalendarClock },
     { id: "customize", label: "Customize", icon: SlidersHorizontal },
-    { id: "videos", label: "Videos", icon: Video }
+    { id: "coders", label: "Coders", icon: Code2 }
   ];
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -213,13 +213,13 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
         <button
           type="button"
           onClick={handleNewChat}
-          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-colors duration-150 cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF] ${
+          className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-full text-[13px] font-medium transition-colors duration-150 cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF] ${
             activeWorkspaceView === "chat" && !activeConversationId
-              ? "bg-gradient-to-r from-[#FF1E8A]/12 via-[#8A2BE2]/12 to-[#0072FF]/15 text-slate-900 dark:text-white border border-[#0072FF]/40"
-              : "bg-slate-100 dark:bg-[#181c2b] hover:bg-slate-200/70 dark:hover:bg-[#1f2437] text-slate-900 dark:text-white border border-slate-200 dark:border-white/[0.08]"
+              ? "bg-slate-200/80 dark:bg-white/[0.1] text-slate-900 dark:text-white"
+              : "bg-slate-100/80 dark:bg-[#181c2b] hover:bg-slate-200/70 dark:hover:bg-[#1f2437] text-slate-800 dark:text-white"
           }`}
         >
-          <Plus className="w-4 h-4 text-[#0072FF] dark:text-[#00E5FF] shrink-0" strokeWidth={2} />
+          <Plus className="w-4 h-4 text-slate-700 dark:text-[#00E5FF] shrink-0" strokeWidth={2} />
           <span>New chat</span>
         </button>
 
@@ -232,13 +232,13 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => handleSelectNav(item.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] transition-colors duration-150 cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF] ${
+                className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-full text-[13px] transition-colors duration-150 cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF] ${
                   isActive
-                    ? "bg-slate-100 dark:bg-white/[0.08] text-slate-900 dark:text-white font-medium"
-                    : "text-slate-600 dark:text-[#94a3b8] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-white/[0.05]"
+                    ? "bg-slate-200/70 dark:bg-white/[0.09] text-slate-900 dark:text-white font-medium"
+                    : "text-slate-600 dark:text-[#94a3b8] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/80 dark:hover:bg-white/[0.05]"
                 }`}
               >
-                <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-[#0072FF] dark:text-[#00E5FF]" : "text-slate-500 dark:text-[#94a3b8]"}`} strokeWidth={1.75} />
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? "text-slate-900 dark:text-[#00E5FF]" : "text-slate-500 dark:text-[#94a3b8]"}`} strokeWidth={1.75} />
                 <span className="truncate">{item.label}</span>
               </button>
             );

@@ -21,8 +21,15 @@ import {
   WorkspaceView,
   ComposerTier,
   PhoneBridgeConfig,
-  PhoneAction
+  PhoneAction,
+  LibraryDocumentItem,
+  StudyWorkspaceState
 } from "../types";
+import {
+  DEFAULT_STUDY_WORKSPACE_STATE,
+  clearUserLibraryBlobs,
+  deleteLibraryBlob
+} from "../lib/libraryStorage";
 import {
   initialUserProfile,
   initialPermissions,
@@ -335,6 +342,14 @@ interface AppContextType {
   toggleTaskCompletion: (id: string) => void;
   deleteTask: (id: string) => void;
 
+  // Library Documents & Study Workspace (Academic, IELTS & Coders)
+  libraryDocs: LibraryDocumentItem[];
+  addLibraryDoc: (docItem: LibraryDocumentItem) => Promise<void>;
+  updateLibraryDoc: (id: string, updates: Partial<LibraryDocumentItem>) => Promise<void>;
+  deleteLibraryDoc: (id: string) => Promise<void>;
+  studyWorkspace: StudyWorkspaceState;
+  updateStudyWorkspace: (updater: Partial<StudyWorkspaceState> | ((prev: StudyWorkspaceState) => StudyWorkspaceState)) => void;
+
   // Transparency Activity Logs & Memory
   activityLogs: ActivityLogItem[];
   addActivityLog: (log: Omit<ActivityLogItem, "id" | "timestamp">) => void;
@@ -459,6 +474,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>(initialActivityLogs);
   const [memoryItems, setMemoryItems] = useState<MemoryItem[]>(initialMemory);
   const [notifications, setNotifications] = useState<NotificationItem[]>(initialNotifications);
+  const [libraryDocs, setLibraryDocs] = useState<LibraryDocumentItem[]>([]);
+  const [studyWorkspace, setStudyWorkspace] = useState<StudyWorkspaceState>(DEFAULT_STUDY_WORKSPACE_STATE);
+  const studySyncTimerRef = useRef<number | null>(null);
 
   // Modal Triggers
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState<boolean>(false);
@@ -521,6 +539,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setKnowledge([]);
     setIntegrations(initialIntegrations);
     setPermissions(initialPermissions);
+    setLibraryDocs([]);
+    setStudyWorkspace(DEFAULT_STUDY_WORKSPACE_STATE);
     setPhoneBridgeConfig(DEFAULT_PHONE_BRIDGE_CONFIG);
     setDeveloperModeState(false);
     setActiveWorkspaceView("chat");
@@ -843,6 +863,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       )
     );
+
+    // 9. Library Documents Listener
+    const libDocsPath = `users/${uid}/libraryDocs`;
+    addSub(
+      onSnapshot(
+        query(collection(db, "users", uid, "libraryDocs"), where("ownerId", "==", uid)),
+        snapshot => {
+          if (activeUidRef.current !== uid) return;
+          const loadedDocs: LibraryDocumentItem[] = snapshot.docs
+            .map(d => {
+              const data = d.data();
+              const createdMs = data.createdAt?.toMillis ? data.createdAt.toMillis() : 0;
+              return {
+                id: d.id,
+                title: data.title || "Untitled Document",
+                folder: data.folder || "Books & Slides",
+                fileType: data.fileType || "PDF",
+                mimeType: data.mimeType || "application/pdf",
+                sizeBytes: Number(data.sizeBytes || 0),
+                sizeLabel: data.sizeLabel || "0 KB",
+                url: data.url || undefined,
+                notes: data.notes || "",
+                localBlobId: data.localBlobId || undefined,
+                textPreview: data.textPreview || undefined,
+                uploadedAt: data.uploadedAt || "Recently",
+                updatedAt: data.updatedAtLabel || "Recently",
+                _sortMs: createdMs
+              };
+            })
+            .sort((a: any, b: any) => (b._sortMs || 0) - (a._sortMs || 0))
+            .map(({ _sortMs, ...rest }: any) => rest);
+          setLibraryDocs(loadedDocs);
+        },
+        err => {
+          handleFirestoreError(err, OperationType.LIST, libDocsPath);
+        }
+      )
+    );
+
+    // 10. Study Workspace Listener (Academic, IELTS & Coders progress)
+    const studyDocPath = `users/${uid}/studyWorkspaces/default`;
+    addSub(
+      onSnapshot(
+        doc(db, "users", uid, "studyWorkspaces", "default"),
+        docSnap => {
+          if (activeUidRef.current !== uid) return;
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setStudyWorkspace({
+              gpaScale: data.gpaScale === "5.0" ? "5.0" : "4.0",
+              gpaCourses: Array.isArray(data.gpaCourses) ? data.gpaCourses : DEFAULT_STUDY_WORKSPACE_STATE.gpaCourses,
+              syllabusItems: Array.isArray(data.syllabusItems) ? data.syllabusItems : DEFAULT_STUDY_WORKSPACE_STATE.syllabusItems,
+              academicChecklist: Array.isArray(data.academicChecklist) ? data.academicChecklist : DEFAULT_STUDY_WORKSPACE_STATE.academicChecklist,
+              academicLinks: Array.isArray(data.academicLinks) ? data.academicLinks : DEFAULT_STUDY_WORKSPACE_STATE.academicLinks,
+              pomodoroMinutesTotal: Number(data.pomodoroMinutesTotal || 0),
+              ieltsTargetBand: Number(data.ieltsTargetBand || 7.5),
+              ieltsScores: data.ieltsScores || DEFAULT_STUDY_WORKSPACE_STATE.ieltsScores,
+              ieltsPracticeLogs: Array.isArray(data.ieltsPracticeLogs) ? data.ieltsPracticeLogs : DEFAULT_STUDY_WORKSPACE_STATE.ieltsPracticeLogs,
+              ieltsVocabNotes: Array.isArray(data.ieltsVocabNotes) ? data.ieltsVocabNotes : DEFAULT_STUDY_WORKSPACE_STATE.ieltsVocabNotes,
+              ieltsChecklist: Array.isArray(data.ieltsChecklist) ? data.ieltsChecklist : DEFAULT_STUDY_WORKSPACE_STATE.ieltsChecklist,
+              codersBookmarkedIds: Array.isArray(data.codersBookmarkedIds) ? data.codersBookmarkedIds : [],
+              codersCompletedIds: Array.isArray(data.codersCompletedIds) ? data.codersCompletedIds : []
+            });
+          } else {
+            setStudyWorkspace(DEFAULT_STUDY_WORKSPACE_STATE);
+          }
+        },
+        err => {
+          handleFirestoreError(err, OperationType.GET, studyDocPath);
+        }
+      )
+    );
   };
 
   // Listen strictly to Firebase Auth state; NEVER load shared/fallback data for unauthenticated visitors
@@ -1036,7 +1128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     activeUidRef.current = null;
 
     if (currentUser && uid && currentUser.emailVerified) {
-      const subcollections = ["agents", "memories", "conversations", "notebooks", "notes", "tasks", "activityLogs"];
+      const subcollections = ["agents", "memories", "conversations", "notebooks", "notes", "tasks", "activityLogs", "libraryDocs", "studyWorkspaces"];
       for (const sub of subcollections) {
         try {
           const snap = await getDocs(query(collection(db, "users", uid, sub), where("ownerId", "==", uid)));
@@ -1052,6 +1144,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err) {
         console.warn("User doc delete notice:", err);
       }
+    }
+
+    if (uid) {
+      await clearUserLibraryBlobs(uid);
     }
 
     if (currentUser) {
@@ -1884,6 +1980,149 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const addLibraryDoc = async (docItem: LibraryDocumentItem) => {
+    setLibraryDocs(prev => [docItem, ...prev]);
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const docId = sanitizeDocId(docItem.id);
+      const path = `users/${uid}/libraryDocs/${docId}`;
+      const payload: Record<string, any> = {
+        ownerId: uid,
+        title: String(docItem.title || "Untitled Document").slice(0, 240),
+        folder: docItem.folder || "Books & Slides",
+        fileType: docItem.fileType || "PDF",
+        mimeType: String(docItem.mimeType || "application/pdf").slice(0, 120),
+        sizeBytes: Math.max(0, Math.min(2147483647, Math.round(docItem.sizeBytes || 0))),
+        sizeLabel: String(docItem.sizeLabel || "0 KB").slice(0, 40),
+        notes: String(docItem.notes || "").slice(0, 15000),
+        uploadedAt: String(docItem.uploadedAt || "Just now").slice(0, 60),
+        updatedAtLabel: String(docItem.updatedAt || "Just now").slice(0, 60),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      if (docItem.url) payload.url = String(docItem.url).slice(0, 600);
+      if (docItem.localBlobId) payload.localBlobId = String(docItem.localBlobId).slice(0, 128);
+      if (docItem.textPreview) payload.textPreview = String(docItem.textPreview).slice(0, 12000);
+      try {
+        await setDoc(doc(db, "users", uid, "libraryDocs", docId), payload);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, path);
+      }
+    }
+  };
+
+  const updateLibraryDoc = async (id: string, updates: Partial<LibraryDocumentItem>) => {
+    let updatedDoc: LibraryDocumentItem | undefined;
+    setLibraryDocs(prev =>
+      prev.map(item => {
+        if (item.id === id) {
+          updatedDoc = { ...item, ...updates, updatedAt: "Just now" };
+          return updatedDoc;
+        }
+        return item;
+      })
+    );
+    if (updatedDoc && auth.currentUser && auth.currentUser.emailVerified) {
+      const uid = auth.currentUser.uid;
+      const docId = sanitizeDocId(id);
+      const path = `users/${uid}/libraryDocs/${docId}`;
+      const payload: Record<string, any> = {
+        ownerId: uid,
+        title: String(updatedDoc.title || "Untitled Document").slice(0, 240),
+        folder: updatedDoc.folder || "Books & Slides",
+        fileType: updatedDoc.fileType || "PDF",
+        mimeType: String(updatedDoc.mimeType || "application/pdf").slice(0, 120),
+        sizeBytes: Math.max(0, Math.min(2147483647, Math.round(updatedDoc.sizeBytes || 0))),
+        sizeLabel: String(updatedDoc.sizeLabel || "0 KB").slice(0, 40),
+        notes: String(updatedDoc.notes || "").slice(0, 15000),
+        uploadedAt: String(updatedDoc.uploadedAt || "Just now").slice(0, 60),
+        updatedAtLabel: "Just now",
+        updatedAt: serverTimestamp()
+      };
+      if (updatedDoc.url) payload.url = String(updatedDoc.url).slice(0, 600);
+      if (updatedDoc.localBlobId) payload.localBlobId = String(updatedDoc.localBlobId).slice(0, 128);
+      if (updatedDoc.textPreview) payload.textPreview = String(updatedDoc.textPreview).slice(0, 12000);
+      try {
+        const ref = doc(db, "users", uid, "libraryDocs", docId);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await updateDoc(ref, payload);
+        } else {
+          await setDoc(ref, { ...payload, createdAt: serverTimestamp() });
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, path);
+      }
+    }
+  };
+
+  const deleteLibraryDoc = async (id: string) => {
+    const target = libraryDocs.find(d => d.id === id);
+    setLibraryDocs(prev => prev.filter(d => d.id !== id));
+    const uid = auth.currentUser?.uid;
+    if (uid && target?.localBlobId) {
+      await deleteLibraryBlob(uid, target.localBlobId).catch(() => {});
+    }
+    if (auth.currentUser && auth.currentUser.emailVerified && uid) {
+      const docId = sanitizeDocId(id);
+      const path = `users/${uid}/libraryDocs/${docId}`;
+      try {
+        await deleteDoc(doc(db, "users", uid, "libraryDocs", docId));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, path);
+      }
+    }
+  };
+
+  const persistStudyWorkspaceToFirestore = async (nextState: StudyWorkspaceState) => {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+    const uid = auth.currentUser.uid;
+    const path = `users/${uid}/studyWorkspaces/default`;
+    const ref = doc(db, "users", uid, "studyWorkspaces", "default");
+    const payload = {
+      ownerId: uid,
+      gpaScale: nextState.gpaScale === "5.0" ? "5.0" : "4.0",
+      gpaCourses: (nextState.gpaCourses || []).slice(0, 80),
+      syllabusItems: (nextState.syllabusItems || []).slice(0, 80),
+      academicChecklist: (nextState.academicChecklist || []).slice(0, 100),
+      academicLinks: (nextState.academicLinks || []).slice(0, 60),
+      pomodoroMinutesTotal: Math.max(0, Math.min(1000000, Math.round(nextState.pomodoroMinutesTotal || 0))),
+      ieltsTargetBand: Math.max(0, Math.min(9, Number(nextState.ieltsTargetBand || 7.5))),
+      ieltsScores: nextState.ieltsScores || DEFAULT_STUDY_WORKSPACE_STATE.ieltsScores,
+      ieltsPracticeLogs: (nextState.ieltsPracticeLogs || []).slice(0, 120),
+      ieltsVocabNotes: (nextState.ieltsVocabNotes || []).slice(0, 150),
+      ieltsChecklist: (nextState.ieltsChecklist || []).slice(0, 100),
+      codersBookmarkedIds: (nextState.codersBookmarkedIds || []).slice(0, 100).map(s => String(s).slice(0, 80)),
+      codersCompletedIds: (nextState.codersCompletedIds || []).slice(0, 100).map(s => String(s).slice(0, 80)),
+      updatedAt: serverTimestamp()
+    };
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        await updateDoc(ref, payload);
+      } else {
+        await setDoc(ref, { ...payload, createdAt: serverTimestamp() });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  const updateStudyWorkspace = (
+    updater: Partial<StudyWorkspaceState> | ((prev: StudyWorkspaceState) => StudyWorkspaceState)
+  ) => {
+    setStudyWorkspace(prev => {
+      const next = typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      if (studySyncTimerRef.current) {
+        window.clearTimeout(studySyncTimerRef.current);
+      }
+      studySyncTimerRef.current = window.setTimeout(() => {
+        void persistStudyWorkspaceToFirestore(next);
+      }, 350);
+      return next;
+    });
+  };
+
   const addActivityLog = (log: Omit<ActivityLogItem, "id" | "timestamp">) => {
     const id = `act_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -2132,6 +2371,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTask,
         toggleTaskCompletion,
         deleteTask,
+        libraryDocs,
+        addLibraryDoc,
+        updateLibraryDoc,
+        deleteLibraryDoc,
+        studyWorkspace,
+        updateStudyWorkspace,
         activityLogs,
         addActivityLog,
         clearActivityLogs,

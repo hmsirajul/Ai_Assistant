@@ -532,6 +532,175 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "LibraryDoc": {
+      "title": "LibraryDoc",
+      "description": "Metadata and personal study notes for an uploaded PDF, slide deck, document, or bookmark owned by the user (binary blobs stored locally in user-scoped IndexedDB).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "folder": {
+          "type": "string",
+          "enum": ["Dictionary", "Books & Slides", "Notes", "Papers", "Bookmarks"]
+        },
+        "fileType": {
+          "type": "string",
+          "enum": ["PDF", "Slides", "Image", "Text", "Bookmark"]
+        },
+        "mimeType": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "sizeLabel": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 15000
+        },
+        "localBlobId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "textPreview": {
+          "type": "string",
+          "maxLength": 12000
+        },
+        "uploadedAt": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "updatedAtLabel": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "title",
+        "folder",
+        "fileType",
+        "mimeType",
+        "sizeBytes",
+        "sizeLabel",
+        "notes",
+        "uploadedAt",
+        "updatedAtLabel",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StudyWorkspace": {
+      "title": "StudyWorkspace",
+      "description": "Private Academic GPA/Syllabus/Checklist, IELTS Band/Practice/Vocab, and Coders progress workspace owned by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "gpaScale": {
+          "type": "string",
+          "enum": ["4.0", "5.0"]
+        },
+        "gpaCourses": {
+          "type": "array",
+          "description": "Bounded list of up to 80 graded courses"
+        },
+        "syllabusItems": {
+          "type": "array",
+          "description": "Bounded list of up to 80 syllabus progress trackers"
+        },
+        "academicChecklist": {
+          "type": "array",
+          "description": "Bounded list of up to 100 academic assignment/exam items"
+        },
+        "academicLinks": {
+          "type": "array",
+          "description": "Bounded list of up to 60 academic resource links"
+        },
+        "pomodoroMinutesTotal": {
+          "type": "integer"
+        },
+        "ieltsTargetBand": {
+          "type": "number"
+        },
+        "ieltsScores": {
+          "type": "object"
+        },
+        "ieltsPracticeLogs": {
+          "type": "array",
+          "description": "Bounded list of up to 120 IELTS practice entries"
+        },
+        "ieltsVocabNotes": {
+          "type": "array",
+          "description": "Bounded list of up to 150 vocabulary & cue card entries"
+        },
+        "ieltsChecklist": {
+          "type": "array",
+          "description": "Bounded list of up to 100 IELTS preparation checklist items"
+        },
+        "codersBookmarkedIds": {
+          "type": "array",
+          "description": "Bounded list of up to 100 bookmarked coder resources"
+        },
+        "codersCompletedIds": {
+          "type": "array",
+          "description": "Bounded list of up to 100 completed coder resources"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "gpaScale",
+        "gpaCourses",
+        "syllabusItems",
+        "academicChecklist",
+        "academicLinks",
+        "pomodoroMinutesTotal",
+        "ieltsTargetBand",
+        "ieltsScores",
+        "ieltsPracticeLogs",
+        "ieltsVocabNotes",
+        "ieltsChecklist",
+        "codersBookmarkedIds",
+        "codersCompletedIds",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -566,6 +735,14 @@
     "/users/{userId}/activityLogs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },
       "description": "Private command activity audit logs owned by userId."
+    },
+    "/users/{userId}/libraryDocs/{docId}": {
+      "schema": { "$ref": "#/entities/LibraryDoc" },
+      "description": "Private study library documents and bookmarks owned by userId."
+    },
+    "/users/{userId}/studyWorkspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/StudyWorkspace" },
+      "description": "Private Study Table (Academic & IELTS) and Coders progress owned by userId."
     }
   }
 }

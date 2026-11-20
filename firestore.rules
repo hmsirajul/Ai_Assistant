@@ -216,6 +216,74 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    // Validation Blueprint: LibraryDoc
+    function isValidLibraryDoc(data) {
+      return data.keys().hasAll([
+          'ownerId', 'title', 'folder', 'fileType', 'mimeType', 'sizeBytes', 'sizeLabel',
+          'notes', 'uploadedAt', 'updatedAtLabel', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'title', 'folder', 'fileType', 'mimeType', 'sizeBytes', 'sizeLabel',
+          'url', 'notes', 'localBlobId', 'textPreview', 'uploadedAt', 'updatedAtLabel', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 240
+        && data.folder in ['Dictionary', 'Books & Slides', 'Notes', 'Papers', 'Bookmarks']
+        && data.fileType in ['PDF', 'Slides', 'Image', 'Text', 'Bookmark']
+        && data.mimeType is string && data.mimeType.size() <= 120
+        && data.sizeBytes is int && data.sizeBytes >= 0 && data.sizeBytes <= 2147483647
+        && data.sizeLabel is string && data.sizeLabel.size() <= 40
+        && (!('url' in data) || (data.url is string && data.url.size() <= 600))
+        && data.notes is string && data.notes.size() <= 15000
+        && (!('localBlobId' in data) || (data.localBlobId is string && data.localBlobId.size() <= 128))
+        && (!('textPreview' in data) || (data.textPreview is string && data.textPreview.size() <= 12000))
+        && data.uploadedAt is string && data.uploadedAt.size() <= 60
+        && data.updatedAtLabel is string && data.updatedAtLabel.size() <= 60
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: StudyWorkspace
+    function isValidStudyWorkspace(data) {
+      return data.keys().hasAll([
+          'ownerId', 'gpaScale', 'gpaCourses', 'syllabusItems', 'academicChecklist',
+          'academicLinks', 'pomodoroMinutesTotal', 'ieltsTargetBand', 'ieltsScores',
+          'ieltsPracticeLogs', 'ieltsVocabNotes', 'ieltsChecklist',
+          'codersBookmarkedIds', 'codersCompletedIds', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'gpaScale', 'gpaCourses', 'syllabusItems', 'academicChecklist',
+          'academicLinks', 'pomodoroMinutesTotal', 'ieltsTargetBand', 'ieltsScores',
+          'ieltsPracticeLogs', 'ieltsVocabNotes', 'ieltsChecklist',
+          'codersBookmarkedIds', 'codersCompletedIds', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
+        && data.gpaScale in ['4.0', '5.0']
+        && data.gpaCourses is list && data.gpaCourses.size() <= 80
+        && (data.gpaCourses.size() == 0 || data.gpaCourses[0] is map)
+        && data.syllabusItems is list && data.syllabusItems.size() <= 80
+        && (data.syllabusItems.size() == 0 || data.syllabusItems[0] is map)
+        && data.academicChecklist is list && data.academicChecklist.size() <= 100
+        && (data.academicChecklist.size() == 0 || data.academicChecklist[0] is map)
+        && data.academicLinks is list && data.academicLinks.size() <= 60
+        && (data.academicLinks.size() == 0 || data.academicLinks[0] is map)
+        && data.pomodoroMinutesTotal is int && data.pomodoroMinutesTotal >= 0 && data.pomodoroMinutesTotal <= 1000000
+        && data.ieltsTargetBand is number && data.ieltsTargetBand >= 0 && data.ieltsTargetBand <= 9
+        && data.ieltsScores is map
+        && data.ieltsPracticeLogs is list && data.ieltsPracticeLogs.size() <= 120
+        && (data.ieltsPracticeLogs.size() == 0 || data.ieltsPracticeLogs[0] is map)
+        && data.ieltsVocabNotes is list && data.ieltsVocabNotes.size() <= 150
+        && (data.ieltsVocabNotes.size() == 0 || data.ieltsVocabNotes[0] is map)
+        && data.ieltsChecklist is list && data.ieltsChecklist.size() <= 100
+        && (data.ieltsChecklist.size() == 0 || data.ieltsChecklist[0] is map)
+        && data.codersBookmarkedIds is list && data.codersBookmarkedIds.size() <= 100
+        && (data.codersBookmarkedIds.size() == 0 || (data.codersBookmarkedIds[0] is string && data.codersBookmarkedIds[0].size() <= 80))
+        && data.codersCompletedIds is list && data.codersCompletedIds.size() <= 100
+        && (data.codersCompletedIds.size() == 0 || (data.codersCompletedIds[0] is string && data.codersCompletedIds[0].size() <= 80))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Collection: /users/{userId}
     match /users/{userId} {
       allow get: if isValidId(userId) && isOwner(userId);
@@ -482,6 +550,82 @@ service cloud.firestore {
         allow delete: if isVerifiedUser()
           && isValidId(userId)
           && isValidId(logId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/libraryDocs/{docId}
+      match /libraryDocs/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && isOwner(userId)
+          && isValidLibraryDoc(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && isOwner(userId)
+          && isValidLibraryDoc(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'folder', 'fileType', 'mimeType', 'sizeBytes', 'sizeLabel',
+            'url', 'notes', 'localBlobId', 'textPreview', 'updatedAtLabel', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+      }
+
+      // Subcollection: /users/{userId}/studyWorkspaces/{workspaceId}
+      match /studyWorkspaces/{workspaceId} {
+        allow get: if isValidId(userId) && isValidId(workspaceId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(workspaceId)
+          && isOwner(userId)
+          && isValidStudyWorkspace(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(workspaceId)
+          && isOwner(userId)
+          && isValidStudyWorkspace(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'gpaScale', 'gpaCourses', 'syllabusItems', 'academicChecklist',
+            'academicLinks', 'pomodoroMinutesTotal', 'ieltsTargetBand', 'ieltsScores',
+            'ieltsPracticeLogs', 'ieltsVocabNotes', 'ieltsChecklist',
+            'codersBookmarkedIds', 'codersCompletedIds', 'updatedAt'
+          ]);
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(workspaceId)
           && isOwner(userId)
           && exists(/databases/$(database)/documents/users/$(userId))
           && get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid;
