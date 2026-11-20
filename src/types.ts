@@ -205,6 +205,8 @@ export interface NotificationItem {
   category: "task" | "confirmation" | "automation" | "reminder" | "security" | "system";
   timestamp: string;
   read: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
   actionRequired?: {
     type: string;
     target: string;
@@ -344,6 +346,48 @@ export interface StudyCheckItem {
   category: string;
   dueDate: string;
   completed: boolean;
+  source?: "manual" | "google_classroom";
+  externalId?: string;
+  courseName?: string;
+  description?: string;
+  linkUrl?: string;
+  attachmentUrl?: string;
+  attachmentLabel?: string;
+  updatedAtIso?: string;
+}
+
+export interface ClassroomCourseSummary {
+  id: string;
+  name: string;
+  section?: string;
+  teacherName?: string;
+  alternateLink?: string;
+}
+
+export interface ClassroomNotificationRecord {
+  id: string;
+  externalId: string;
+  type: "assignment" | "announcement" | "material";
+  courseId: string;
+  courseName: string;
+  teacherName: string;
+  title: string;
+  summary: string;
+  linkUrl?: string;
+  createdAtIso: string;
+  timestampLabel: string;
+  read: boolean;
+}
+
+export interface ClassroomConnectionState {
+  connected: boolean;
+  accountEmail: string;
+  accountName: string;
+  lastSyncAt: string;
+  courses: ClassroomCourseSummary[];
+  assignmentNotifications: boolean;
+  announcementNotifications: boolean;
+  browserNotifications: boolean;
 }
 
 export interface AcademicLinkItem {
@@ -388,4 +432,6 @@ export interface StudyWorkspaceState {
   ieltsChecklist: StudyCheckItem[];
   codersBookmarkedIds: string[];
   codersCompletedIds: string[];
+  classroomConnection: ClassroomConnectionState;
+  classroomNotificationHistory: ClassroomNotificationRecord[];
 }

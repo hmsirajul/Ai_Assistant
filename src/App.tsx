@@ -21,7 +21,7 @@ import { VisionModal } from "./components/features/VisionModal";
 import { NotesTasksModal } from "./components/features/NotesTasksModal";
 import { PhoneActionsModal } from "./components/features/PhoneActionsModal";
 
-import { Bell, RefreshCw, X } from "lucide-react";
+import { Bell, ExternalLink, RefreshCw, X } from "lucide-react";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { OfflineIndicator } from "./components/common/OfflineIndicator";
 import { DiptiKLogo } from "./components/common/DiptiKLogo";
@@ -46,7 +46,7 @@ const WorkspaceContent: React.FC = () => {
     if (!hasNewToast || !latestNotif) return;
     const timer = setTimeout(() => {
       setDismissedNotifId(latestNotif.id);
-    }, 4500);
+    }, 5500);
     return () => clearTimeout(timer);
   }, [hasNewToast, latestNotif]);
 
@@ -88,6 +88,17 @@ const WorkspaceContent: React.FC = () => {
             <p className="text-[11px] text-slate-600 dark:text-[#94a3b8] mt-0.5 leading-relaxed line-clamp-2">
               {latestNotif.message}
             </p>
+            {latestNotif.actionUrl && (
+              <a
+                href={latestNotif.actionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-medium text-[#0072FF] dark:text-[#00E5FF] hover:underline"
+              >
+                <span>{latestNotif.actionLabel || "Open in Google Classroom"}</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
           <button
             type="button"

@@ -3,6 +3,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  linkWithPopup,
+  reauthenticateWithPopup,
   signOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -103,7 +105,10 @@ async function testConnection() {
 testConnection();
 
 export {
+  GoogleAuthProvider,
   signInWithPopup,
+  linkWithPopup,
+  reauthenticateWithPopup,
   signOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,

@@ -255,7 +255,9 @@ service cloud.firestore {
           'ownerId', 'gpaScale', 'gpaCourses', 'syllabusItems', 'academicChecklist',
           'academicLinks', 'pomodoroMinutesTotal', 'ieltsTargetBand', 'ieltsScores',
           'ieltsPracticeLogs', 'ieltsVocabNotes', 'ieltsChecklist',
-          'codersBookmarkedIds', 'codersCompletedIds', 'createdAt', 'updatedAt'
+          'codersBookmarkedIds', 'codersCompletedIds',
+          'classroomConnection', 'classroomNotificationHistory',
+          'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && isValidId(data.ownerId) && data.ownerId == request.auth.uid
         && data.gpaScale in ['4.0', '5.0']
@@ -280,6 +282,8 @@ service cloud.firestore {
         && (data.codersBookmarkedIds.size() == 0 || (data.codersBookmarkedIds[0] is string && data.codersBookmarkedIds[0].size() <= 80))
         && data.codersCompletedIds is list && data.codersCompletedIds.size() <= 100
         && (data.codersCompletedIds.size() == 0 || (data.codersCompletedIds[0] is string && data.codersCompletedIds[0].size() <= 80))
+        && (!('classroomConnection' in data) || data.classroomConnection is map)
+        && (!('classroomNotificationHistory' in data) || (data.classroomNotificationHistory is list && data.classroomNotificationHistory.size() <= 100 && (data.classroomNotificationHistory.size() == 0 || data.classroomNotificationHistory[0] is map)))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -620,7 +624,8 @@ service cloud.firestore {
             'gpaScale', 'gpaCourses', 'syllabusItems', 'academicChecklist',
             'academicLinks', 'pomodoroMinutesTotal', 'ieltsTargetBand', 'ieltsScores',
             'ieltsPracticeLogs', 'ieltsVocabNotes', 'ieltsChecklist',
-            'codersBookmarkedIds', 'codersCompletedIds', 'updatedAt'
+            'codersBookmarkedIds', 'codersCompletedIds',
+            'classroomConnection', 'classroomNotificationHistory', 'updatedAt'
           ]);
 
         allow delete: if isVerifiedUser()

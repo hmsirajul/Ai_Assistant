@@ -23,13 +23,24 @@ import {
   PhoneBridgeConfig,
   PhoneAction,
   LibraryDocumentItem,
-  StudyWorkspaceState
+  StudyWorkspaceState,
+  StudyCheckItem,
+  ClassroomConnectionState,
+  ClassroomNotificationRecord
 } from "../types";
 import {
   DEFAULT_STUDY_WORKSPACE_STATE,
   clearUserLibraryBlobs,
   deleteLibraryBlob
 } from "../lib/libraryStorage";
+import {
+  connectGoogleClassroomOAuth,
+  fetchGoogleClassroomSnapshot,
+  getClassroomAccessToken,
+  clearClassroomAccessToken,
+  dispatchBrowserNotification,
+  requestBrowserNotificationPermission
+} from "../lib/googleClassroom";
 import {
   initialUserProfile,
   initialPermissions,
@@ -131,6 +142,10 @@ function loadPhoneBridgeForUid(uid?: string | null): PhoneBridgeConfig {
 function sanitizeDocId(rawId: string): string {
   const cleaned = (rawId || "").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
   return cleaned || `doc_${Date.now()}`;
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function sanitizeForBlueprint(profile: UserProfile, uid: string) {
@@ -350,6 +365,22 @@ interface AppContextType {
   studyWorkspace: StudyWorkspaceState;
   updateStudyWorkspace: (updater: Partial<StudyWorkspaceState> | ((prev: StudyWorkspaceState) => StudyWorkspaceState)) => void;
 
+  // Google Classroom Connections & Smart Notifications
+  classroomTokenReady: boolean;
+  classroomSyncing: boolean;
+  classroomSyncError: string | null;
+  connectGoogleClassroom: (forceSelectAccount?: boolean) => Promise<void>;
+  syncGoogleClassroomNow: (options?: { silent?: boolean; isInitialConnect?: boolean }) => Promise<void>;
+  disconnectGoogleClassroom: (removeSyncedTasks?: boolean) => Promise<void>;
+  updateClassroomPreferences: (
+    updates: Partial<
+      Pick<ClassroomConnectionState, "assignmentNotifications" | "announcementNotifications" | "browserNotifications">
+    >
+  ) => Promise<void>;
+  markClassroomNotificationRead: (id: string) => void;
+  markAllClassroomNotificationsRead: () => void;
+  clearClassroomNotificationHistory: () => void;
+
   // Transparency Activity Logs & Memory
   activityLogs: ActivityLogItem[];
   addActivityLog: (log: Omit<ActivityLogItem, "id" | "timestamp">) => void;
@@ -476,7 +507,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notifications, setNotifications] = useState<NotificationItem[]>(initialNotifications);
   const [libraryDocs, setLibraryDocs] = useState<LibraryDocumentItem[]>([]);
   const [studyWorkspace, setStudyWorkspace] = useState<StudyWorkspaceState>(DEFAULT_STUDY_WORKSPACE_STATE);
+  const studyWorkspaceRef = useRef<StudyWorkspaceState>(DEFAULT_STUDY_WORKSPACE_STATE);
   const studySyncTimerRef = useRef<number | null>(null);
+  const [classroomTokenReady, setClassroomTokenReady] = useState<boolean>(false);
+  const [classroomSyncing, setClassroomSyncing] = useState<boolean>(false);
+  const [classroomSyncError, setClassroomSyncError] = useState<string | null>(null);
+  const classroomSyncInFlightRef = useRef<boolean>(false);
+  const lastAutoPollAtRef = useRef<number>(0);
 
   // Modal Triggers
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState<boolean>(false);
@@ -541,6 +578,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPermissions(initialPermissions);
     setLibraryDocs([]);
     setStudyWorkspace(DEFAULT_STUDY_WORKSPACE_STATE);
+    studyWorkspaceRef.current = DEFAULT_STUDY_WORKSPACE_STATE;
+    clearClassroomAccessToken();
+    setClassroomTokenReady(false);
+    setClassroomSyncing(false);
+    setClassroomSyncError(null);
+    classroomSyncInFlightRef.current = false;
     setPhoneBridgeConfig(DEFAULT_PHONE_BRIDGE_CONFIG);
     setDeveloperModeState(false);
     setActiveWorkspaceView("chat");
@@ -902,7 +945,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       )
     );
 
-    // 10. Study Workspace Listener (Academic, IELTS & Coders progress)
+    // 10. Study Workspace Listener (Academic, IELTS, Coders & Google Classroom sync)
     const studyDocPath = `users/${uid}/studyWorkspaces/default`;
     addSub(
       onSnapshot(
@@ -911,7 +954,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (activeUidRef.current !== uid) return;
           if (docSnap.exists()) {
             const data = docSnap.data();
-            setStudyWorkspace({
+            const mergedStudy: StudyWorkspaceState = {
               gpaScale: data.gpaScale === "5.0" ? "5.0" : "4.0",
               gpaCourses: Array.isArray(data.gpaCourses) ? data.gpaCourses : DEFAULT_STUDY_WORKSPACE_STATE.gpaCourses,
               syllabusItems: Array.isArray(data.syllabusItems) ? data.syllabusItems : DEFAULT_STUDY_WORKSPACE_STATE.syllabusItems,
@@ -924,9 +967,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               ieltsVocabNotes: Array.isArray(data.ieltsVocabNotes) ? data.ieltsVocabNotes : DEFAULT_STUDY_WORKSPACE_STATE.ieltsVocabNotes,
               ieltsChecklist: Array.isArray(data.ieltsChecklist) ? data.ieltsChecklist : DEFAULT_STUDY_WORKSPACE_STATE.ieltsChecklist,
               codersBookmarkedIds: Array.isArray(data.codersBookmarkedIds) ? data.codersBookmarkedIds : [],
-              codersCompletedIds: Array.isArray(data.codersCompletedIds) ? data.codersCompletedIds : []
-            });
+              codersCompletedIds: Array.isArray(data.codersCompletedIds) ? data.codersCompletedIds : [],
+              classroomConnection: data.classroomConnection
+                ? {
+                    ...DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection,
+                    ...data.classroomConnection,
+                    courses: Array.isArray(data.classroomConnection.courses) ? data.classroomConnection.courses : []
+                  }
+                : DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection,
+              classroomNotificationHistory: Array.isArray(data.classroomNotificationHistory)
+                ? data.classroomNotificationHistory
+                : []
+            };
+            studyWorkspaceRef.current = mergedStudy;
+            setStudyWorkspace(mergedStudy);
           } else {
+            studyWorkspaceRef.current = DEFAULT_STUDY_WORKSPACE_STATE;
             setStudyWorkspace(DEFAULT_STUDY_WORKSPACE_STATE);
           }
         },
@@ -2079,21 +2135,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const uid = auth.currentUser.uid;
     const path = `users/${uid}/studyWorkspaces/default`;
     const ref = doc(db, "users", uid, "studyWorkspaces", "default");
+    const safeClassroomConn = stripUndefinedDeep({
+      connected: Boolean(nextState.classroomConnection?.connected),
+      accountEmail: String(nextState.classroomConnection?.accountEmail || "").slice(0, 150),
+      accountName: String(nextState.classroomConnection?.accountName || "").slice(0, 120),
+      lastSyncAt: String(nextState.classroomConnection?.lastSyncAt || "").slice(0, 60),
+      courses: (nextState.classroomConnection?.courses || []).slice(0, 25),
+      assignmentNotifications: nextState.classroomConnection?.assignmentNotifications ?? true,
+      announcementNotifications: nextState.classroomConnection?.announcementNotifications ?? true,
+      browserNotifications: Boolean(nextState.classroomConnection?.browserNotifications)
+    });
+    const safeHistory = stripUndefinedDeep((nextState.classroomNotificationHistory || []).slice(0, 100));
+
     const payload = {
       ownerId: uid,
       gpaScale: nextState.gpaScale === "5.0" ? "5.0" : "4.0",
-      gpaCourses: (nextState.gpaCourses || []).slice(0, 80),
-      syllabusItems: (nextState.syllabusItems || []).slice(0, 80),
-      academicChecklist: (nextState.academicChecklist || []).slice(0, 100),
-      academicLinks: (nextState.academicLinks || []).slice(0, 60),
+      gpaCourses: stripUndefinedDeep((nextState.gpaCourses || []).slice(0, 80)),
+      syllabusItems: stripUndefinedDeep((nextState.syllabusItems || []).slice(0, 80)),
+      academicChecklist: stripUndefinedDeep((nextState.academicChecklist || []).slice(0, 100)),
+      academicLinks: stripUndefinedDeep((nextState.academicLinks || []).slice(0, 60)),
       pomodoroMinutesTotal: Math.max(0, Math.min(1000000, Math.round(nextState.pomodoroMinutesTotal || 0))),
       ieltsTargetBand: Math.max(0, Math.min(9, Number(nextState.ieltsTargetBand || 7.5))),
-      ieltsScores: nextState.ieltsScores || DEFAULT_STUDY_WORKSPACE_STATE.ieltsScores,
-      ieltsPracticeLogs: (nextState.ieltsPracticeLogs || []).slice(0, 120),
-      ieltsVocabNotes: (nextState.ieltsVocabNotes || []).slice(0, 150),
-      ieltsChecklist: (nextState.ieltsChecklist || []).slice(0, 100),
+      ieltsScores: stripUndefinedDeep(nextState.ieltsScores || DEFAULT_STUDY_WORKSPACE_STATE.ieltsScores),
+      ieltsPracticeLogs: stripUndefinedDeep((nextState.ieltsPracticeLogs || []).slice(0, 120)),
+      ieltsVocabNotes: stripUndefinedDeep((nextState.ieltsVocabNotes || []).slice(0, 150)),
+      ieltsChecklist: stripUndefinedDeep((nextState.ieltsChecklist || []).slice(0, 100)),
       codersBookmarkedIds: (nextState.codersBookmarkedIds || []).slice(0, 100).map(s => String(s).slice(0, 80)),
       codersCompletedIds: (nextState.codersCompletedIds || []).slice(0, 100).map(s => String(s).slice(0, 80)),
+      classroomConnection: safeClassroomConn,
+      classroomNotificationHistory: safeHistory,
       updatedAt: serverTimestamp()
     };
     try {
@@ -2113,6 +2183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   ) => {
     setStudyWorkspace(prev => {
       const next = typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      studyWorkspaceRef.current = next;
       if (studySyncTimerRef.current) {
         window.clearTimeout(studySyncTimerRef.current);
       }
@@ -2122,6 +2193,389 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return next;
     });
   };
+
+  const syncGoogleClassroomNow = async (options?: { silent?: boolean; isInitialConnect?: boolean }) => {
+    const token = getClassroomAccessToken();
+    if (!token) {
+      setClassroomTokenReady(false);
+      if (!options?.silent) {
+        setClassroomSyncError("Session token not active in memory. Reconnect Google Classroom to sync live updates.");
+      }
+      return;
+    }
+    if (classroomSyncInFlightRef.current) return;
+    classroomSyncInFlightRef.current = true;
+    setClassroomSyncing(true);
+    setClassroomSyncError(null);
+
+    try {
+      const snapshot = await fetchGoogleClassroomSnapshot(token);
+      const curr = studyWorkspaceRef.current;
+      const prevConn = curr.classroomConnection || DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection;
+      const hadPreviousSync = Boolean(prevConn.lastSyncAt) && !options?.isInitialConnect;
+
+      // 1. De-duplicated assignment upsert into academicChecklist (Study Table Task Manager)
+      const existingChecklist = [...(curr.academicChecklist || [])];
+      const byExternalId = new Map<string, number>();
+      existingChecklist.forEach((item, idx) => {
+        if (item.externalId) {
+          byExternalId.set(item.externalId, idx);
+        }
+      });
+
+      let newAssignmentCount = 0;
+      const newlyAddedAssignments: typeof snapshot.assignments = [];
+
+      for (const a of snapshot.assignments) {
+        const existingIdx = byExternalId.get(a.externalId);
+        if (existingIdx !== undefined) {
+          const prevTask = existingChecklist[existingIdx];
+          existingChecklist[existingIdx] = {
+            ...prevTask,
+            title: a.title,
+            category: "Classroom",
+            dueDate: a.dueDateLabel,
+            source: "google_classroom",
+            externalId: a.externalId,
+            courseName: a.courseName,
+            description: a.description || undefined,
+            linkUrl: a.linkUrl || undefined,
+            attachmentUrl: a.attachmentUrl || undefined,
+            attachmentLabel: a.attachmentLabel || undefined,
+            updatedAtIso: a.updateTime
+          };
+        } else {
+          newAssignmentCount += 1;
+          newlyAddedAssignments.push(a);
+          const createdTask: StudyCheckItem = {
+            id: `ack_gc_${sanitizeDocId(a.externalId)}`,
+            title: a.title,
+            category: "Classroom",
+            dueDate: a.dueDateLabel,
+            completed: false,
+            source: "google_classroom",
+            externalId: a.externalId,
+            courseName: a.courseName,
+            description: a.description || undefined,
+            linkUrl: a.linkUrl || undefined,
+            attachmentUrl: a.attachmentUrl || undefined,
+            attachmentLabel: a.attachmentLabel || undefined,
+            updatedAtIso: a.updateTime
+          };
+          existingChecklist.unshift(createdTask);
+          byExternalId.set(a.externalId, 0);
+          // Re-index map keys shifted by unshift
+          existingChecklist.forEach((item, idx) => {
+            if (item.externalId) byExternalId.set(item.externalId, idx);
+          });
+        }
+      }
+
+      // Prioritize keeping manual tasks + newest Classroom tasks within Firestore's 100-item bound
+      const manualTasks = existingChecklist.filter(t => t.source !== "google_classroom");
+      const classroomTasks = existingChecklist.filter(t => t.source === "google_classroom");
+      const mergedChecklist = [
+        ...classroomTasks.slice(0, Math.max(0, 100 - manualTasks.length)),
+        ...manualTasks
+      ].slice(0, 100);
+
+      // 2. Smart Notification History & Alerts (Assignments + Announcements + Materials)
+      const prevHistory = [...(curr.classroomNotificationHistory || [])];
+      const existingHistoryExternalIds = new Set(prevHistory.map(h => h.externalId));
+      const newHistoryRecords: ClassroomNotificationRecord[] = [];
+      const formatLabel = (iso: string) => {
+        const dt = new Date(iso);
+        if (Number.isNaN(dt.getTime())) return "Just now";
+        return dt.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      };
+
+      for (const a of snapshot.assignments) {
+        if (!existingHistoryExternalIds.has(a.externalId)) {
+          existingHistoryExternalIds.add(a.externalId);
+          newHistoryRecords.push({
+            id: `cn_a_${sanitizeDocId(a.externalId)}`,
+            externalId: a.externalId,
+            type: "assignment",
+            courseId: a.courseId,
+            courseName: a.courseName,
+            teacherName: a.teacherName,
+            title: a.title,
+            summary: a.description ? a.description.slice(0, 180) : `New assignment due ${a.dueDateLabel}.`,
+            linkUrl: a.linkUrl,
+            createdAtIso: a.updateTime || a.creationTime,
+            timestampLabel: formatLabel(a.updateTime || a.creationTime),
+            read: !hadPreviousSync
+          });
+        }
+      }
+
+      const newlyDetectedUpdates: typeof snapshot.updates = [];
+      for (const u of snapshot.updates) {
+        if (!existingHistoryExternalIds.has(u.externalId)) {
+          existingHistoryExternalIds.add(u.externalId);
+          newlyDetectedUpdates.push(u);
+          newHistoryRecords.push({
+            id: `cn_u_${sanitizeDocId(u.externalId)}`,
+            externalId: u.externalId,
+            type: u.type,
+            courseId: u.courseId,
+            courseName: u.courseName,
+            teacherName: u.teacherName,
+            title: u.title,
+            summary: u.summary,
+            linkUrl: u.linkUrl,
+            createdAtIso: u.updateTime || u.creationTime,
+            timestampLabel: formatLabel(u.updateTime || u.creationTime),
+            read: !hadPreviousSync
+          });
+        }
+      }
+
+      const mergedHistory = [...newHistoryRecords, ...prevHistory]
+        .sort((a, b) => new Date(b.createdAtIso).getTime() - new Date(a.createdAtIso).getTime())
+        .slice(0, 100);
+
+      const syncTimestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const nextState: StudyWorkspaceState = {
+        ...curr,
+        academicChecklist: mergedChecklist,
+        classroomConnection: {
+          ...prevConn,
+          connected: true,
+          lastSyncAt: syncTimestamp,
+          courses: snapshot.courses
+        },
+        classroomNotificationHistory: mergedHistory
+      };
+
+      studyWorkspaceRef.current = nextState;
+      setStudyWorkspace(nextState);
+      if (studySyncTimerRef.current) {
+        window.clearTimeout(studySyncTimerRef.current);
+      }
+      await persistStudyWorkspaceToFirestore(nextState);
+
+      // 3. Emit targeted notifications respecting user preferences
+      if (!hadPreviousSync) {
+        addNotification({
+          title: "Google Classroom Connected",
+          message: `Synced ${snapshot.courses.length} course(s), ${snapshot.assignments.length} assignment(s), and ${snapshot.updates.length} classroom update(s).`,
+          category: "system"
+        });
+      } else {
+        if (prevConn.assignmentNotifications && newlyAddedAssignments.length > 0) {
+          const topA = newlyAddedAssignments[0];
+          const extra = newlyAddedAssignments.length > 1 ? ` (+${newlyAddedAssignments.length - 1} more)` : "";
+          const msg = `${topA.courseName}: ${topA.title} · Due ${topA.dueDateLabel}${extra}`;
+          addNotification({
+            title: "New Classroom Assignment Added",
+            message: msg,
+            category: "task",
+            actionUrl: topA.linkUrl,
+            actionLabel: "Open in Classroom"
+          });
+          if (prevConn.browserNotifications) {
+            dispatchBrowserNotification("New Classroom Assignment", msg);
+          }
+        }
+
+        if (prevConn.announcementNotifications && newlyDetectedUpdates.length > 0) {
+          const topU = newlyDetectedUpdates[0];
+          const extra = newlyDetectedUpdates.length > 1 ? ` (+${newlyDetectedUpdates.length - 1} more updates)` : "";
+          const msg = `${topU.teacherName}: ${topU.summary}${extra}`;
+          addNotification({
+            title: `${topU.courseName} · Announcement`,
+            message: msg,
+            category: "reminder",
+            actionUrl: topU.linkUrl,
+            actionLabel: "Open Original Post"
+          });
+          if (prevConn.browserNotifications) {
+            dispatchBrowserNotification(`${topU.courseName} · ${topU.teacherName}`, msg);
+          }
+        } else if (!options?.silent && newAssignmentCount === 0 && newlyDetectedUpdates.length === 0) {
+          addNotification({
+            title: "Classroom Up to Date",
+            message: `Checked ${snapshot.courses.length} active course(s). No new posts since ${syncTimestamp}.`,
+            category: "system"
+          });
+        }
+      }
+
+      lastAutoPollAtRef.current = Date.now();
+    } catch (err: any) {
+      if (err?.message === "CLASSROOM_TOKEN_EXPIRED") {
+        clearClassroomAccessToken();
+        setClassroomTokenReady(false);
+        setClassroomSyncError("Google Classroom session expired. Click Reconnect to resume live sync.");
+      } else {
+        const msg = err?.message || "Unable to reach Google Classroom API.";
+        setClassroomSyncError(msg);
+        if (!options?.silent) {
+          addNotification({
+            title: "Classroom Sync Issue",
+            message: msg,
+            category: "system"
+          });
+        }
+      }
+    } finally {
+      classroomSyncInFlightRef.current = false;
+      setClassroomSyncing(false);
+    }
+  };
+
+  const connectGoogleClassroom = async (forceSelectAccount = false) => {
+    setClassroomSyncError(null);
+    setClassroomSyncing(true);
+    try {
+      const res = await connectGoogleClassroomOAuth(forceSelectAccount);
+      setClassroomTokenReady(true);
+
+      const curr = studyWorkspaceRef.current;
+      const isInitialConnect = !curr.classroomConnection?.connected;
+      const nextState: StudyWorkspaceState = {
+        ...curr,
+        classroomConnection: {
+          ...(curr.classroomConnection || DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection),
+          connected: true,
+          accountEmail: res.accountEmail,
+          accountName: res.accountName
+        }
+      };
+      studyWorkspaceRef.current = nextState;
+      setStudyWorkspace(nextState);
+      await persistStudyWorkspaceToFirestore(nextState);
+
+      setClassroomSyncing(false);
+      await syncGoogleClassroomNow({ silent: false, isInitialConnect });
+    } catch (err: any) {
+      setClassroomSyncing(false);
+      const code = err?.code || "";
+      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        setClassroomSyncError("Google sign-in popup was closed before completing authorization.");
+      } else {
+        const msg = err?.message || "Could not authorize Google Classroom.";
+        setClassroomSyncError(msg);
+        addNotification({
+          title: "Classroom Authorization Failed",
+          message: msg,
+          category: "security"
+        });
+      }
+    }
+  };
+
+  const disconnectGoogleClassroom = async (removeSyncedTasks = false) => {
+    clearClassroomAccessToken();
+    setClassroomTokenReady(false);
+    setClassroomSyncError(null);
+
+    const curr = studyWorkspaceRef.current;
+    const nextChecklist = removeSyncedTasks
+      ? (curr.academicChecklist || []).filter(item => item.source !== "google_classroom")
+      : curr.academicChecklist || [];
+
+    const nextState: StudyWorkspaceState = {
+      ...curr,
+      academicChecklist: nextChecklist,
+      classroomConnection: {
+        ...DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection,
+        assignmentNotifications: curr.classroomConnection?.assignmentNotifications ?? true,
+        announcementNotifications: curr.classroomConnection?.announcementNotifications ?? true,
+        browserNotifications: false
+      },
+      classroomNotificationHistory: []
+    };
+
+    studyWorkspaceRef.current = nextState;
+    setStudyWorkspace(nextState);
+    if (studySyncTimerRef.current) {
+      window.clearTimeout(studySyncTimerRef.current);
+    }
+    await persistStudyWorkspaceToFirestore(nextState);
+
+    addNotification({
+      title: "Google Classroom Disconnected",
+      message: removeSyncedTasks
+        ? "Disconnected Google Classroom and removed synced assignments."
+        : "Disconnected Google Classroom. Existing tasks remain in your Study Table.",
+      category: "system"
+    });
+  };
+
+  const updateClassroomPreferences = async (
+    updates: Partial<
+      Pick<ClassroomConnectionState, "assignmentNotifications" | "announcementNotifications" | "browserNotifications">
+    >
+  ) => {
+    let resolvedBrowserPref = updates.browserNotifications;
+    if (updates.browserNotifications === true) {
+      const granted = await requestBrowserNotificationPermission();
+      if (!granted) {
+        resolvedBrowserPref = false;
+        setClassroomSyncError("Browser notifications are blocked or unsupported in this window.");
+      }
+    }
+
+    updateStudyWorkspace(prev => ({
+      ...prev,
+      classroomConnection: {
+        ...(prev.classroomConnection || DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection),
+        ...updates,
+        ...(resolvedBrowserPref !== undefined ? { browserNotifications: resolvedBrowserPref } : {})
+      }
+    }));
+  };
+
+  const markClassroomNotificationRead = (id: string) => {
+    updateStudyWorkspace(prev => ({
+      ...prev,
+      classroomNotificationHistory: (prev.classroomNotificationHistory || []).map(item =>
+        item.id === id ? { ...item, read: true } : item
+      )
+    }));
+  };
+
+  const markAllClassroomNotificationsRead = () => {
+    updateStudyWorkspace(prev => ({
+      ...prev,
+      classroomNotificationHistory: (prev.classroomNotificationHistory || []).map(item => ({
+        ...item,
+        read: true
+      }))
+    }));
+  };
+
+  const clearClassroomNotificationHistory = () => {
+    updateStudyWorkspace(prev => ({
+      ...prev,
+      classroomNotificationHistory: []
+    }));
+  };
+
+  // Background Classroom sync across all app views (every 90s + on tab visibility return)
+  useEffect(() => {
+    if (!isAuthenticated || !studyWorkspace.classroomConnection?.connected || !classroomTokenReady) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void syncGoogleClassroomNow({ silent: true });
+    }, 90_000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastAutoPollAtRef.current > 20_000) {
+        void syncGoogleClassroomNow({ silent: true });
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [isAuthenticated, studyWorkspace.classroomConnection?.connected, classroomTokenReady]);
 
   const addActivityLog = (log: Omit<ActivityLogItem, "id" | "timestamp">) => {
     const id = `act_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
@@ -2377,6 +2831,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteLibraryDoc,
         studyWorkspace,
         updateStudyWorkspace,
+        classroomTokenReady,
+        classroomSyncing,
+        classroomSyncError,
+        connectGoogleClassroom,
+        syncGoogleClassroomNow,
+        disconnectGoogleClassroom,
+        updateClassroomPreferences,
+        markClassroomNotificationRead,
+        markAllClassroomNotificationsRead,
+        clearClassroomNotificationHistory,
         activityLogs,
         addActivityLog,
         clearActivityLogs,

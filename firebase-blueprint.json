@@ -674,6 +674,14 @@
           "type": "array",
           "description": "Bounded list of up to 100 completed coder resources"
         },
+        "classroomConnection": {
+          "type": "object",
+          "description": "Connected Google Classroom account metadata, synced courses list, and notification preferences"
+        },
+        "classroomNotificationHistory": {
+          "type": "array",
+          "description": "Bounded list of up to 100 Google Classroom announcement and assignment notifications"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"

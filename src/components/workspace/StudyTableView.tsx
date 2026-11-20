@@ -22,7 +22,16 @@ import {
   Clock,
   Calculator,
   ListChecks,
-  ChevronRight
+  ChevronRight,
+  RefreshCw,
+  Bell,
+  BellOff,
+  Megaphone,
+  Paperclip,
+  Link2,
+  Unplug,
+  AlertCircle,
+  CheckCheck
 } from "lucide-react";
 
 const GRADE_OPTIONS_4: { label: string; point: number }[] = [
@@ -65,8 +74,28 @@ function getCefrForBand(band: number): string {
 }
 
 export const StudyTableView: React.FC = () => {
-  const { studyWorkspace, updateStudyWorkspace } = useApp();
+  const {
+    studyWorkspace,
+    updateStudyWorkspace,
+    classroomTokenReady,
+    classroomSyncing,
+    classroomSyncError,
+    connectGoogleClassroom,
+    syncGoogleClassroomNow,
+    disconnectGoogleClassroom,
+    updateClassroomPreferences,
+    markClassroomNotificationRead,
+    markAllClassroomNotificationsRead,
+    clearClassroomNotificationHistory
+  } = useApp();
   const [subTab, setSubTab] = useState<"academic" | "ielts">("academic");
+
+  // Google Classroom Connections UI state
+  const [taskSourceFilter, setTaskSourceFilter] = useState<"all" | "classroom" | "manual">("all");
+  const [notifHistoryFilter, setNotifHistoryFilter] = useState<"all" | "assignment" | "announcement">("all");
+  const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
+  const [removeTasksOnDisconnect, setRemoveTasksOnDisconnect] = useState(false);
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false);
 
   // Academic: GPA quick add
   const [courseSemester, setCourseSemester] = useState("Semester 3");
@@ -311,6 +340,21 @@ export const StudyTableView: React.FC = () => {
   };
 
   const pendingAcadCount = studyWorkspace.academicChecklist.filter(i => !i.completed).length;
+  const classroomConn = studyWorkspace.classroomConnection;
+  const classroomHistory = studyWorkspace.classroomNotificationHistory || [];
+  const unreadClassroomCount = classroomHistory.filter(n => !n.read).length;
+
+  const filteredAcademicTasks = studyWorkspace.academicChecklist.filter(item => {
+    if (taskSourceFilter === "classroom") return item.source === "google_classroom";
+    if (taskSourceFilter === "manual") return item.source !== "google_classroom";
+    return true;
+  });
+
+  const filteredClassroomHistory = classroomHistory.filter(entry => {
+    if (notifHistoryFilter === "assignment") return entry.type === "assignment";
+    if (notifHistoryFilter === "announcement") return entry.type === "announcement" || entry.type === "material";
+    return true;
+  });
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto gemini-scroll px-4 sm:px-8 pb-12">
@@ -392,6 +436,426 @@ export const StudyTableView: React.FC = () => {
                   <span className="text-xs font-normal text-slate-400 dark:text-[#64748b] ml-1">mins</span>
                 </p>
               </div>
+            </div>
+
+            {/* Connections: Google Classroom Integration & Smart Notifications */}
+            <div
+              id="classroom-connections"
+              className="p-5 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] space-y-5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 dark:border-white/[0.06] pb-4">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link2 className="w-4 h-4 text-[#0072FF] dark:text-[#00E5FF]" />
+                    <h2 className="font-display text-base font-semibold text-slate-900 dark:text-white">
+                      Connections · Google Classroom
+                    </h2>
+                    {classroomConn.connected && (
+                      <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">
+                        · {classroomTokenReady ? "Live sync active" : "Synced (reconnect for live polling)"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-[#94a3b8]">
+                    {classroomConn.connected
+                      ? `Connected as ${classroomConn.accountName || "Google Account"} (${classroomConn.accountEmail})${
+                          classroomConn.lastSyncAt ? ` · Last synced ${classroomConn.lastSyncAt}` : ""
+                        }`
+                      : "Authorize with Google OAuth 2.0 to sync active courses, auto-import assignments into your Task Manager, and receive teacher announcement alerts."}
+                  </p>
+                </div>
+
+                {classroomConn.connected ? (
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {classroomTokenReady ? (
+                      <button
+                        type="button"
+                        onClick={() => void syncGoogleClassroomNow({ silent: false })}
+                        disabled={classroomSyncing}
+                        className="px-3 py-1.5 rounded-xl bg-[#0072FF] hover:bg-[#005ce6] disabled:opacity-60 text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${classroomSyncing ? "animate-spin" : ""}`} />
+                        <span>{classroomSyncing ? "Syncing..." : "Sync Now"}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void connectGoogleClassroom(false)}
+                        disabled={classroomSyncing}
+                        className="h-9 px-3.5 rounded-xl bg-white dark:bg-[#131314] border border-[#747775]/60 dark:border-[#8e918f]/60 hover:bg-slate-50 dark:hover:bg-[#1f2024] text-slate-800 dark:text-[#e3e3e3] text-xs font-medium flex items-center gap-2 cursor-pointer whitespace-nowrap transition-colors"
+                      >
+                        <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" aria-hidden="true">
+                          <path fill="#EA4335" d="M12 5c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 1.09 14.97 0 12 0 7.31 0 3.26 2.69 1.29 6.6l3.66 2.84C5.81 6.86 8.65 5 12 5z" />
+                          <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58l3.72 2.89c2.17-2 3.7-4.95 3.7-8.71z" />
+                          <path fill="#FBBC05" d="M4.95 14.44A7.12 7.12 0 0 1 4.58 12c0-.85.15-1.68.37-2.44L1.29 6.72A11.98 11.98 0 0 0 0 12c0 1.93.46 3.77 1.29 5.28l3.66-2.84z" />
+                          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.72-2.89c-1.08.72-2.45 1.16-4.21 1.16-3.35 0-6.19-1.86-7.05-4.44l-3.66 2.84C3.26 21.31 7.31 24 12 24z" />
+                        </svg>
+                        <span>{classroomSyncing ? "Connecting..." : "Reconnect Live Sync"}</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => void connectGoogleClassroom(true)}
+                      disabled={classroomSyncing}
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-[#181c2b] hover:bg-slate-200 dark:hover:bg-[#1f2437] text-slate-700 dark:text-[#cbd5e1] text-xs font-medium cursor-pointer whitespace-nowrap transition-colors"
+                    >
+                      Switch Account
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDisconnectOpen(true)}
+                      className="px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 text-xs font-medium flex items-center gap-1 cursor-pointer whitespace-nowrap transition-colors"
+                    >
+                      <Unplug className="w-3.5 h-3.5" />
+                      <span>Disconnect</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void connectGoogleClassroom(true)}
+                    disabled={classroomSyncing}
+                    className="h-10 px-4 rounded-xl bg-white dark:bg-[#131314] border border-[#747775] dark:border-[#8e918f] hover:bg-slate-50 dark:hover:bg-[#1f2024] text-[#1f1f1f] dark:text-[#e3e3e3] text-sm font-medium flex items-center gap-2.5 cursor-pointer whitespace-nowrap shadow-xs transition-colors disabled:opacity-60"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px] shrink-0" aria-hidden="true">
+                      <path fill="#EA4335" d="M12 5c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 1.09 14.97 0 12 0 7.31 0 3.26 2.69 1.29 6.6l3.66 2.84C5.81 6.86 8.65 5 12 5z" />
+                      <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58l3.72 2.89c2.17-2 3.7-4.95 3.7-8.71z" />
+                      <path fill="#FBBC05" d="M4.95 14.44A7.12 7.12 0 0 1 4.58 12c0-.85.15-1.68.37-2.44L1.29 6.72A11.98 11.98 0 0 0 0 12c0 1.93.46 3.77 1.29 5.28l3.66-2.84z" />
+                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.72-2.89c-1.08.72-2.45 1.16-4.21 1.16-3.35 0-6.19-1.86-7.05-4.44l-3.66 2.84C3.26 21.31 7.31 24 12 24z" />
+                    </svg>
+                    <span>{classroomSyncing ? "Connecting Google Classroom..." : "Sign in with Google"}</span>
+                  </button>
+                )}
+              </div>
+
+              {classroomSyncError && (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span className="flex-1">{classroomSyncError}</span>
+                </div>
+              )}
+
+              {/* Explicit Confirmation Dialog for Disconnecting Google Classroom */}
+              {confirmDisconnectOpen && (
+                <div className="p-4 rounded-xl bg-red-50/70 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-red-900 dark:text-red-200">
+                      Disconnect Google Classroom?
+                    </p>
+                    <p className="text-[11px] text-red-700 dark:text-red-300">
+                      This clears your synced courses and Classroom notification history from this workspace.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-[#cbd5e1] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={removeTasksOnDisconnect}
+                      onChange={e => setRemoveTasksOnDisconnect(e.target.checked)}
+                      className="rounded accent-red-600"
+                    />
+                    <span>Also remove synced Google Classroom assignments from Task Manager</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void disconnectGoogleClassroom(removeTasksOnDisconnect);
+                        setConfirmDisconnectOpen(false);
+                        setRemoveTasksOnDisconnect(false);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium cursor-pointer"
+                    >
+                      Confirm Disconnect
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmDisconnectOpen(false);
+                        setRemoveTasksOnDisconnect(false);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-[#181c2b] border border-slate-200 dark:border-white/[0.08] text-slate-700 dark:text-[#cbd5e1] text-xs font-medium cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {classroomConn.connected && (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  {/* Left: Connected Courses & Notification Preferences */}
+                  <div className="lg:col-span-5 space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-[#94a3b8]">
+                          Synced Courses ({classroomConn.courses.length})
+                        </h3>
+                      </div>
+                      {classroomConn.courses.length === 0 ? (
+                        <p className="text-xs text-slate-400 dark:text-[#64748b] py-3">
+                          No active courses found for this Google account.
+                        </p>
+                      ) : (
+                        <div className="space-y-2 max-h-52 overflow-y-auto gemini-scroll pr-1">
+                          {classroomConn.courses.map(course => (
+                            <div
+                              key={course.id}
+                              className="p-3 rounded-xl bg-slate-50 dark:bg-[#181c2b] border border-slate-200/80 dark:border-white/[0.06] flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                                  {course.name}
+                                  {course.section ? ` · ${course.section}` : ""}
+                                </p>
+                                <p className="text-[11px] text-slate-500 dark:text-[#94a3b8] truncate">
+                                  {course.teacherName || "Google Classroom"}
+                                </p>
+                              </div>
+                              {course.alternateLink && (
+                                <a
+                                  href={course.alternateLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label={`Open ${course.name} in Google Classroom`}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-[#0072FF] dark:hover:text-[#00E5FF] shrink-0"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Notification Preferences */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#181c2b] border border-slate-200/80 dark:border-white/[0.06] space-y-3">
+                      <div className="flex items-center gap-1.5">
+                        <Bell className="w-3.5 h-3.5 text-[#0072FF] dark:text-[#00E5FF]" />
+                        <h3 className="text-xs font-semibold text-slate-900 dark:text-white">
+                          Notification Preferences
+                        </h3>
+                      </div>
+
+                      <label className="flex items-center justify-between gap-3 cursor-pointer">
+                        <div>
+                          <p className="text-xs font-medium text-slate-800 dark:text-white">
+                            Assignment alerts
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-[#94a3b8]">
+                            Notify when new coursework is added to Task Manager
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={classroomConn.assignmentNotifications}
+                          onChange={e =>
+                            void updateClassroomPreferences({ assignmentNotifications: e.target.checked })
+                          }
+                          className="w-4 h-4 accent-[#0072FF] cursor-pointer shrink-0"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between gap-3 cursor-pointer">
+                        <div>
+                          <p className="text-xs font-medium text-slate-800 dark:text-white">
+                            Announcement & material alerts
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-[#94a3b8]">
+                            Short notifications with teacher name and post link
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={classroomConn.announcementNotifications}
+                          onChange={e =>
+                            void updateClassroomPreferences({ announcementNotifications: e.target.checked })
+                          }
+                          className="w-4 h-4 accent-[#0072FF] cursor-pointer shrink-0"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between gap-3 cursor-pointer">
+                        <div>
+                          <p className="text-xs font-medium text-slate-800 dark:text-white">
+                            Desktop browser notifications
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-[#94a3b8]">
+                            Show OS alerts while using other tabs
+                          </p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={classroomConn.browserNotifications}
+                          onChange={e =>
+                            void updateClassroomPreferences({ browserNotifications: e.target.checked })
+                          }
+                          className="w-4 h-4 accent-[#0072FF] cursor-pointer shrink-0"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Right: Notification History Feed */}
+                  <div className="lg:col-span-7 flex flex-col space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Megaphone className="w-3.5 h-3.5 text-[#FF1E8A]" />
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-[#94a3b8]">
+                          Notification History
+                        </h3>
+                        {unreadClassroomCount > 0 && (
+                          <span className="text-[11px] font-semibold text-[#0072FF] dark:text-[#00E5FF] tabular-nums">
+                            · {unreadClassroomCount} new
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(
+                          [
+                            { id: "all", label: "All" },
+                            { id: "assignment", label: "Assignments" },
+                            { id: "announcement", label: "Announcements" }
+                          ] as const
+                        ).map(tab => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setNotifHistoryFilter(tab.id)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer whitespace-nowrap transition-colors ${
+                              notifHistoryFilter === tab.id
+                                ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+                                : "bg-slate-100 dark:bg-[#181c2b] text-slate-600 dark:text-[#94a3b8]"
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                        {unreadClassroomCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={markAllClassroomNotificationsRead}
+                            title="Mark all as read"
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-[#0072FF] dark:hover:text-[#00E5FF] cursor-pointer"
+                          >
+                            <CheckCheck className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {classroomHistory.length > 0 && !confirmClearHistory && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmClearHistory(true)}
+                            title="Clear notification history"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {confirmClearHistory && (
+                      <div className="p-2.5 rounded-xl bg-red-50/70 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 flex items-center justify-between gap-2 text-xs">
+                        <span className="text-red-800 dark:text-red-200">Clear all Classroom notification history?</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearClassroomNotificationHistory();
+                              setConfirmClearHistory(false);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-red-600 text-white text-[11px] font-medium cursor-pointer"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmClearHistory(false)}
+                            className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#181c2b] border border-slate-200 dark:border-white/[0.08] text-[11px] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2 max-h-80 overflow-y-auto gemini-scroll pr-1">
+                      {filteredClassroomHistory.length === 0 ? (
+                        <div className="p-6 rounded-xl bg-slate-50 dark:bg-[#181c2b] border border-slate-200/80 dark:border-white/[0.06] text-center space-y-1.5">
+                          <BellOff className="w-4 h-4 text-slate-400 mx-auto" />
+                          <p className="text-xs text-slate-500 dark:text-[#94a3b8]">
+                            No classroom updates recorded for this filter yet.
+                          </p>
+                        </div>
+                      ) : (
+                        filteredClassroomHistory.map(item => (
+                          <div
+                            key={item.id}
+                            onClick={() => {
+                              if (!item.read) markClassroomNotificationRead(item.id);
+                            }}
+                            className={`p-3.5 rounded-xl border transition-colors ${
+                              item.read
+                                ? "bg-slate-50 dark:bg-[#181c2b] border-slate-200/80 dark:border-white/[0.06]"
+                                : "bg-blue-50/50 dark:bg-[#0072FF]/10 border-[#0072FF]/30"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  {!item.read && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#0072FF] dark:bg-[#00E5FF] shrink-0" />
+                                  )}
+                                  <span className="font-semibold text-[#0072FF] dark:text-[#00E5FF]">
+                                    {item.type === "assignment"
+                                      ? "Assignment"
+                                      : item.type === "material"
+                                      ? "Material"
+                                      : "Announcement"}
+                                  </span>
+                                  <span className="text-slate-400 dark:text-[#64748b]">·</span>
+                                  <span className="font-medium text-slate-700 dark:text-[#cbd5e1] truncate">
+                                    {item.courseName}
+                                  </span>
+                                  <span className="text-slate-400 dark:text-[#64748b]">·</span>
+                                  <span className="text-slate-500 dark:text-[#94a3b8] truncate">
+                                    {item.teacherName}
+                                  </span>
+                                </div>
+                                <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                                  {item.title}
+                                </p>
+                                <p className="text-[11px] text-slate-600 dark:text-[#cbd5e1] leading-relaxed line-clamp-2">
+                                  {item.summary}
+                                </p>
+                              </div>
+                              <span className="text-[10px] text-slate-400 dark:text-[#64748b] tabular-nums shrink-0">
+                                {item.timestampLabel}
+                              </span>
+                            </div>
+                            {item.linkUrl && (
+                              <div className="mt-2 pt-2 border-t border-slate-200/60 dark:border-white/[0.06] flex justify-end">
+                                <a
+                                  href={item.linkUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0072FF] dark:text-[#00E5FF] hover:underline"
+                                >
+                                  <span>Open in Google Classroom</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Row 1: GPA/CGPA Calculator + Pomodoro Focus Timer */}
@@ -704,13 +1168,38 @@ export const StudyTableView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Assignment & Exam Checklist */}
+              {/* Assignment & Exam Task Manager */}
               <div className="p-5 rounded-2xl bg-white dark:bg-[#121520] border border-slate-200 dark:border-white/[0.08] space-y-4">
-                <div className="flex items-center gap-2">
-                  <ListChecks className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <h2 className="font-display text-base font-semibold text-slate-900 dark:text-white">
-                    Assignments & Exam Checklist
-                  </h2>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <ListChecks className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <h2 className="font-display text-base font-semibold text-slate-900 dark:text-white">
+                      Task Manager & Assignments
+                    </h2>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    {(
+                      [
+                        { id: "all", label: "All" },
+                        { id: "classroom", label: "Classroom" },
+                        { id: "manual", label: "Manual" }
+                      ] as const
+                    ).map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setTaskSourceFilter(tab.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer whitespace-nowrap transition-colors ${
+                          taskSourceFilter === tab.id
+                            ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+                            : "bg-slate-100 dark:bg-[#181c2b] text-slate-600 dark:text-[#94a3b8]"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <form onSubmit={handleAddAcademicCheck} className="flex items-center gap-2">
@@ -738,54 +1227,107 @@ export const StudyTableView: React.FC = () => {
                   </button>
                 </form>
 
-                <div className="divide-y divide-slate-100 dark:divide-white/[0.06] max-h-64 overflow-y-auto gemini-scroll">
-                  {studyWorkspace.academicChecklist.map(item => (
-                    <div key={item.id} className="py-2.5 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateStudyWorkspace(prev => ({
-                            ...prev,
-                            academicChecklist: prev.academicChecklist.map(x =>
-                              x.id === item.id ? { ...x, completed: !x.completed } : x
-                            )
-                          }))
-                        }
-                        className="flex items-center gap-2.5 text-left flex-1 min-w-0 cursor-pointer"
-                      >
-                        {item.completed ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                        ) : (
-                          <Circle className="w-4 h-4 text-slate-400 shrink-0" />
-                        )}
-                        <span
-                          className={`text-xs truncate ${
-                            item.completed ? "line-through text-slate-400 dark:text-[#64748b]" : "text-slate-900 dark:text-white"
-                          }`}
-                        >
-                          {item.title}
-                        </span>
-                      </button>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] text-slate-400 dark:text-[#64748b] tabular-nums">
-                          {item.dueDate}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateStudyWorkspace(prev => ({
-                              ...prev,
-                              academicChecklist: prev.academicChecklist.filter(x => x.id !== item.id)
-                            }))
-                          }
-                          aria-label="Delete item"
-                          className="p-1 text-slate-400 hover:text-red-500 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                <div className="divide-y divide-slate-100 dark:divide-white/[0.06] max-h-72 overflow-y-auto gemini-scroll">
+                  {filteredAcademicTasks.length === 0 ? (
+                    <p className="text-xs text-slate-400 dark:text-[#64748b] py-6 text-center">
+                      {taskSourceFilter === "classroom"
+                        ? "No Google Classroom assignments synced yet."
+                        : "No tasks in this list yet."}
+                    </p>
+                  ) : (
+                    filteredAcademicTasks.map(item => (
+                      <div key={item.id} className="py-3 flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateStudyWorkspace(prev => ({
+                                ...prev,
+                                academicChecklist: prev.academicChecklist.map(x =>
+                                  x.id === item.id ? { ...x, completed: !x.completed } : x
+                                )
+                              }))
+                            }
+                            aria-label={`Toggle ${item.title}`}
+                            className="mt-0.5 shrink-0 cursor-pointer"
+                          >
+                            {item.completed ? (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            ) : (
+                              <Circle className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <p
+                              className={`text-xs font-medium ${
+                                item.completed
+                                  ? "line-through text-slate-400 dark:text-[#64748b]"
+                                  : "text-slate-900 dark:text-white"
+                              }`}
+                            >
+                              {item.title}
+                            </p>
+                            {(item.courseName || item.source === "google_classroom") && (
+                              <p className="text-[11px] text-[#0072FF] dark:text-[#00E5FF] truncate">
+                                {item.courseName || "Google Classroom"}
+                              </p>
+                            )}
+                            {item.description && (
+                              <p className="text-[11px] text-slate-500 dark:text-[#94a3b8] line-clamp-2 leading-relaxed">
+                                {item.description}
+                              </p>
+                            )}
+                            {(item.linkUrl || item.attachmentUrl) && (
+                              <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                                {item.linkUrl && (
+                                  <a
+                                    href={item.linkUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-[#cbd5e1] hover:text-[#0072FF] dark:hover:text-[#00E5FF]"
+                                  >
+                                    <span>Open Assignment</span>
+                                    <ExternalLink className="w-3 h-3" />
+                                  </a>
+                                )}
+                                {item.attachmentUrl && (
+                                  <a
+                                    href={item.attachmentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-[#cbd5e1] hover:text-[#0072FF] dark:hover:text-[#00E5FF]"
+                                  >
+                                    <Paperclip className="w-3 h-3" />
+                                    <span className="truncate max-w-[160px]">
+                                      {item.attachmentLabel || "Attachment"}
+                                    </span>
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] text-slate-400 dark:text-[#64748b] tabular-nums">
+                            {item.dueDate}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateStudyWorkspace(prev => ({
+                                ...prev,
+                                academicChecklist: prev.academicChecklist.filter(x => x.id !== item.id)
+                              }))
+                            }
+                            aria-label="Delete item"
+                            className="p-1 text-slate-400 hover:text-red-500 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>

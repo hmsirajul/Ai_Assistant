@@ -294,7 +294,18 @@ export const DEFAULT_STUDY_WORKSPACE_STATE: StudyWorkspaceState = {
     }
   ],
   codersBookmarkedIds: [],
-  codersCompletedIds: []
+  codersCompletedIds: [],
+  classroomConnection: {
+    connected: false,
+    accountEmail: "",
+    accountName: "",
+    lastSyncAt: "",
+    courses: [],
+    assignmentNotifications: true,
+    announcementNotifications: true,
+    browserNotifications: false
+  },
+  classroomNotificationHistory: []
 };
 
 export function loadLocalLibraryDocs(uid: string): any[] {
