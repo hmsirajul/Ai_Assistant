@@ -219,6 +219,288 @@ function isModelOverloadedError(err: any): boolean {
   return msg.includes("503") || msg.includes("UNAVAILABLE");
 }
 
+function isSearchToolQuotaOrUnsupported(err: any): boolean {
+  const status = Number(err?.status || 0);
+  const msg = String(err?.message || err);
+  return (
+    status === 429 ||
+    status === 403 ||
+    status === 400 ||
+    msg.includes("429") ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    msg.includes("quota") ||
+    msg.includes("PERMISSION_DENIED") ||
+    msg.includes("INVALID_ARGUMENT")
+  );
+}
+
+let googleSearchCooldownUntil = 0;
+
+function decodeXmlEntities(str: string): string {
+  return str
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function describeWmoWeatherCode(code: number): string {
+  if (code === 0) return "Clear sky";
+  if (code <= 3) return "Partly cloudy";
+  if (code <= 48) return "Foggy";
+  if (code <= 57) return "Drizzle";
+  if (code <= 67) return "Rain";
+  if (code <= 77) return "Snow";
+  if (code <= 82) return "Rain showers";
+  if (code <= 99) return "Thunderstorm";
+  return "Variable conditions";
+}
+
+function isSafePublicHttpUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+    const h = parsed.hostname.toLowerCase();
+    if (
+      h === "localhost" ||
+      h === "127.0.0.1" ||
+      h === "0.0.0.0" ||
+      h === "::1" ||
+      h.startsWith("10.") ||
+      h.startsWith("192.168.") ||
+      h.startsWith("169.254.") ||
+      h.endsWith(".local") ||
+      h.endsWith(".internal")
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchRealtimeWebFallback(
+  rawQuery: string,
+  city?: string
+): Promise<{
+  contextText: string;
+  sources: { title: string; url: string; credibility: string }[];
+}> {
+  const query = rawQuery.trim();
+  const sources: { title: string; url: string; credibility: string }[] = [];
+  const snippets: string[] = [];
+  const seenUrls = new Set<string>();
+  const addSource = (title: string, url: string, credibility: string) => {
+    if (url && isSafePublicHttpUrl(url) && !seenUrls.has(url)) {
+      seenUrls.add(url);
+      sources.push({ title: title || url, url, credibility });
+    }
+  };
+
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (compatible; DiptiKAI/1.0)"
+  };
+
+  const tasks: Promise<void>[] = [];
+
+  // 1. Google News RSS (Live headlines & current events)
+  tasks.push(
+    (async () => {
+      const res = await fetch(
+        `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`,
+        { headers, signal: AbortSignal.timeout(2800) }
+      );
+      if (!res.ok) return;
+      const xml = await res.text();
+      const itemMatches = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+      const topNews: string[] = [];
+      for (const item of itemMatches.slice(0, 5)) {
+        const titleMatch = item.match(/<title>([\s\S]*?)<\/title>/i);
+        const linkMatch = item.match(/<link>([\s\S]*?)<\/link>/i);
+        const pubMatch = item.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+        const srcMatch = item.match(/<source[^>]*>([\s\S]*?)<\/source>/i);
+        const title = titleMatch ? decodeXmlEntities(titleMatch[1]) : "";
+        const link = linkMatch ? decodeXmlEntities(linkMatch[1]) : "";
+        const pubDate = pubMatch ? decodeXmlEntities(pubMatch[1]) : "";
+        const publisher = srcMatch ? decodeXmlEntities(srcMatch[1]) : "Google News";
+        if (title) {
+          topNews.push(`- ${title}${pubDate ? ` (${pubDate})` : ""}${publisher ? ` [${publisher}]` : ""}`);
+          if (link) addSource(title, link, publisher);
+        }
+      }
+      if (topNews.length > 0) {
+        snippets.push(`Live News Results:\n${topNews.join("\n")}`);
+      }
+    })().catch(() => {})
+  );
+
+  // 2. Wikipedia 1-shot Search + Extracts (Historical events, encyclopedic facts, entities)
+  tasks.push(
+    (async () => {
+      const res = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=3&prop=extracts|info&exintro=1&explaintext=1&exchars=650&inprop=url&format=json&origin=*`,
+        { headers, signal: AbortSignal.timeout(2800) }
+      );
+      if (!res.ok) return;
+      const data: any = await res.json();
+      const pagesObj = data?.query?.pages;
+      if (!pagesObj) return;
+      const pages = Object.values(pagesObj)
+        .filter((p: any) => p && (p.extract || p.title))
+        .sort((a: any, b: any) => (a.index ?? 99) - (b.index ?? 99))
+        .slice(0, 3);
+      const wikiLines: string[] = [];
+      for (const p of pages as any[]) {
+        const cleanExtract = String(p.extract || "").replace(/\s+/g, " ").trim().slice(0, 500);
+        if (cleanExtract) {
+          wikiLines.push(`- ${p.title}: ${cleanExtract}`);
+        }
+        if (p.fullurl) {
+          addSource(`${p.title} - Wikipedia`, p.fullurl, "Wikipedia");
+        }
+      }
+      if (wikiLines.length > 0) {
+        snippets.push(`Encyclopedic Reference:\n${wikiLines.join("\n")}`);
+      }
+    })().catch(() => {})
+  );
+
+  // 3. DuckDuckGo Instant Answer API
+  tasks.push(
+    (async () => {
+      const res = await fetch(
+        `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+        { headers, signal: AbortSignal.timeout(2200) }
+      );
+      if (!res.ok) return;
+      const data: any = await res.json();
+      const ddgLines: string[] = [];
+      if (data?.Answer) ddgLines.push(`Instant Answer: ${data.Answer}`);
+      if (data?.AbstractText) {
+        ddgLines.push(`Summary (${data.AbstractSource || "Web"}): ${data.AbstractText}`);
+        if (data.AbstractURL) addSource(data.Heading || data.AbstractSource || "Web", data.AbstractURL, data.AbstractSource || "Live Web");
+      }
+      if (Array.isArray(data?.RelatedTopics)) {
+        for (const rt of data.RelatedTopics.slice(0, 2)) {
+          if (rt?.Text) {
+            ddgLines.push(`- ${rt.Text}`);
+            if (rt.FirstURL) addSource(rt.Text.slice(0, 60), rt.FirstURL, "Live Web");
+          }
+        }
+      }
+      if (ddgLines.length > 0) {
+        snippets.push(`Web Instant Context:\n${ddgLines.join("\n")}`);
+      }
+    })().catch(() => {})
+  );
+
+  // 4. Live Weather via Open-Meteo if weather/forecast query
+  if (/\b(weather|temperature|forecast|rain|humidity|wind)\b/i.test(query)) {
+    tasks.push(
+      (async () => {
+        const cityMatch = query.match(/\b(?:in|for|at)\s+([a-zA-Z\s]{2,35}?)(?:\s+(?:today|now|tomorrow|this week|weather)|\?|$)/i);
+        const targetCity = (cityMatch?.[1] || city || "London").trim();
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&format=json`,
+          { headers, signal: AbortSignal.timeout(2200) }
+        );
+        if (!geoRes.ok) return;
+        const geo: any = await geoRes.json();
+        const loc = geo?.results?.[0];
+        if (!loc) return;
+        const wxRes = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=2`,
+          { headers, signal: AbortSignal.timeout(2200) }
+        );
+        if (!wxRes.ok) return;
+        const wx: any = await wxRes.json();
+        const cur = wx?.current;
+        if (cur) {
+          const cond = describeWmoWeatherCode(Number(cur.weather_code ?? 0));
+          const high = wx?.daily?.temperature_2m_max?.[0];
+          const low = wx?.daily?.temperature_2m_min?.[0];
+          snippets.push(
+            `Live Weather (${loc.name}, ${loc.country || ""}): ${cond}, ${cur.temperature_2m}°C (feels like ${cur.apparent_temperature}°C), Humidity ${cur.relative_humidity_2m}%, Wind ${cur.wind_speed_10m} km/h${high !== undefined ? `, Today High ${high}°C / Low ${low}°C` : ""}.`
+          );
+          addSource(`Open-Meteo Live Weather: ${loc.name}`, "https://open-meteo.com/", "Live Weather");
+        }
+      })().catch(() => {})
+    );
+  }
+
+  // 5. Live Crypto Prices via Coinbase if crypto query
+  if (/\b(bitcoin|btc|ethereum|eth|solana|sol|crypto|dogecoin|doge|xrp)\b/i.test(query)) {
+    tasks.push(
+      (async () => {
+        const coins: [RegExp, string, string][] = [
+          [/\b(bitcoin|btc)\b/i, "BTC-USD", "Bitcoin (BTC)"],
+          [/\b(ethereum|eth)\b/i, "ETH-USD", "Ethereum (ETH)"],
+          [/\b(solana|sol)\b/i, "SOL-USD", "Solana (SOL)"],
+          [/\b(dogecoin|doge)\b/i, "DOGE-USD", "Dogecoin (DOGE)"],
+          [/\bxrp\b/i, "XRP-USD", "XRP"]
+        ];
+        const matched = coins.filter(([rx]) => rx.test(query));
+        const toFetch = matched.length > 0 ? matched : coins.slice(0, 2);
+        const lines: string[] = [];
+        await Promise.all(
+          toFetch.map(async ([, pair, label]) => {
+            const r = await fetch(`https://api.coinbase.com/v2/prices/${pair}/spot`, {
+              headers,
+              signal: AbortSignal.timeout(2000)
+            });
+            if (!r.ok) return;
+            const d: any = await r.json();
+            if (d?.data?.amount) {
+              lines.push(`- ${label}: $${Number(d.data.amount).toLocaleString("en-US", { maximumFractionDigits: 2 })} USD (Coinbase live spot)`);
+            }
+          })
+        );
+        if (lines.length > 0) {
+          snippets.push(`Live Crypto Prices:\n${lines.join("\n")}`);
+          addSource("Coinbase Spot Market Prices", "https://www.coinbase.com/explore", "Live Market");
+        }
+      })().catch(() => {})
+    );
+  }
+
+  // 6. Live Currency Rates if currency/exchange query
+  if (/\b(exchange rate|currency|usd|eur|gbp|bdt|inr|jpy|cad|aud|dollar|pound|euro|taka)\b/i.test(query)) {
+    tasks.push(
+      (async () => {
+        const r = await fetch("https://open.er-api.com/v6/latest/USD", {
+          headers,
+          signal: AbortSignal.timeout(2200)
+        });
+        if (!r.ok) return;
+        const d: any = await r.json();
+        const rates = d?.rates;
+        if (rates) {
+          const picked = ["EUR", "GBP", "BDT", "INR", "JPY", "CAD", "AUD"]
+            .filter(c => rates[c])
+            .map(c => `1 USD = ${rates[c]} ${c}`)
+            .join(", ");
+          if (picked) {
+            snippets.push(`Live FX Rates (Base USD, updated ${d.time_last_update_utc || "today"}): ${picked}`);
+            addSource("ExchangeRate API (Live FX)", "https://www.exchangerate-api.com/", "Live Market");
+          }
+        }
+      })().catch(() => {})
+    );
+  }
+
+  await Promise.allSettled(tasks);
+  return {
+    contextText: snippets.join("\n\n").slice(0, 5000),
+    sources: sources.slice(0, 6)
+  };
+}
+
 async function generateWithModelFallback(
   ai: GoogleGenAI,
   params: {
@@ -259,9 +541,11 @@ async function generateChatWithRetry(
   ai: GoogleGenAI,
   contents: any,
   systemInstruction: string,
-  useSearch: boolean
+  useSearch: boolean,
+  rawUserQuery = ""
 ) {
-  const modelsToTry = useSearch
+  const canTryGoogleSearch = useSearch && Date.now() >= googleSearchCooldownUntil;
+  const modelsToTry = canTryGoogleSearch
     ? [
         { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: true },
         { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: true },
@@ -275,6 +559,7 @@ async function generateChatWithRetry(
 
   let lastErr: any = null;
   let primaryOverloaded = false;
+  let webFallbackData: { contextText: string; sources: { title: string; url: string; credibility: string }[] } | null = null;
 
   for (let i = 0; i < modelsToTry.length; i++) {
     const attempt = modelsToTry[i];
@@ -282,24 +567,45 @@ async function generateChatWithRetry(
       continue;
     }
     try {
+      let effectiveContents = contents;
+      if (useSearch && !attempt.allowSearch && rawUserQuery.trim() && !webFallbackData) {
+        webFallbackData = await fetchRealtimeWebFallback(rawUserQuery);
+      }
+      if (webFallbackData?.contextText && !attempt.allowSearch && Array.isArray(contents) && contents.length > 0) {
+        const cloned = [...contents];
+        const last = cloned[cloned.length - 1];
+        const origText = last?.parts?.[0]?.text || rawUserQuery;
+        cloned[cloned.length - 1] = {
+          role: last?.role || "user",
+          parts: [
+            {
+              text: `${origText}\n\n[Live Web Context Retrieved ${new Date().toISOString()}]:\n${webFallbackData.contextText}`
+            }
+          ]
+        };
+        effectiveContents = cloned;
+      }
+
       const response = await ai.models.generateContent({
         model: attempt.model,
-        contents,
+        contents: effectiveContents,
         config: {
           systemInstruction,
           thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
           ...(attempt.allowSearch ? { tools: [{ googleSearch: {} }] } : {})
         }
       });
-      return { response, usedModel: attempt.model };
+      return { response, usedModel: attempt.model, fallbackSources: webFallbackData?.sources || [] };
     } catch (err: any) {
       lastErr = err;
+      if (attempt.allowSearch && isSearchToolQuotaOrUnsupported(err)) {
+        googleSearchCooldownUntil = Date.now() + 90_000;
+      }
       if (attempt.model === DEFAULT_MODEL && isModelOverloadedError(err)) {
         primaryOverloaded = true;
       }
-      const msg = String(err?.message || err);
       const isTransient = isTransientGeminiError(err);
-      const canFallbackSearch = attempt.allowSearch && (isTransient || msg.includes("400") || msg.includes("INVALID_ARGUMENT"));
+      const canFallbackSearch = attempt.allowSearch && isSearchToolQuotaOrUnsupported(err);
       if ((!isTransient && !canFallbackSearch) || i === modelsToTry.length - 1) throw err;
     }
   }
@@ -395,31 +701,35 @@ async function generateChatWithRetry(
         { role: "user", parts: [{ text: message }] }
       ];
 
+      const canTryGoogleSearch = useSearch && Date.now() >= googleSearchCooldownUntil;
       const modelsToTry = voiceFast
-        ? useSearch
+        ? canTryGoogleSearch
           ? [
               { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: true, status: "Searching live web..." },
               { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: true, status: "Checking live web updates..." },
-              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Answering directly..." }
+              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Fetching live web & answering..." }
             ]
           : [
-              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Generating response..." },
+              { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: useSearch ? "Fetching live web results..." : "Generating response..." },
               { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: false, status: "Responding..." }
             ]
-        : useSearch
+        : canTryGoogleSearch
         ? [
             { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: true, status: "Checking live web updates & thinking..." },
-            { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: true, status: "High demand on primary engine — trying fast engine..." },
-            { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: false, status: "Live search busy — answering directly in real time..." },
+            { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: true, status: "Trying fast search engine..." },
+            { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: false, status: "Fetching live web results..." },
             { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Switching to fast engine..." }
           ]
         : [
-            { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: false, status: "Generating response..." },
+            { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW, allowSearch: false, status: useSearch ? "Fetching live web results..." : "Generating response..." },
             { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL, allowSearch: false, status: "Switching to fast engine..." }
           ];
 
       let streamedText = "";
       let groundingChunks: any[] = [];
+      let fallbackWebSources: { title: string; url: string; credibility: string }[] = [];
+      let fallbackWebContextLoaded = false;
+      let fallbackWebContextText = "";
       let usedModel = DEFAULT_MODEL;
       let streamError: any = null;
       let primaryOverloaded = false;
@@ -429,15 +739,41 @@ async function generateChatWithRetry(
         if (primaryOverloaded && attempt.model === DEFAULT_MODEL) {
           continue;
         }
+        if (attempt.allowSearch && Date.now() < googleSearchCooldownUntil) {
+          continue;
+        }
         usedModel = attempt.model;
         try {
-          if (attemptIdx > 0) {
+          if (attemptIdx > 0 || (useSearch && !attempt.allowSearch)) {
             sendEvent({ type: "status", status: attempt.status });
+          }
+
+          let effectiveContents = contents;
+          if (useSearch && !attempt.allowSearch) {
+            if (!fallbackWebContextLoaded) {
+              fallbackWebContextLoaded = true;
+              const webRes = await fetchRealtimeWebFallback(message, userProfile?.country || "");
+              fallbackWebContextText = webRes.contextText;
+              fallbackWebSources = webRes.sources;
+            }
+            if (fallbackWebContextText) {
+              effectiveContents = [
+                ...chatHistory,
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: `${message}\n\n[Live Web Search Context (${new Date().toISOString()})]:\n${fallbackWebContextText}\n\nUse the live web context above when relevant and cite facts cleanly.`
+                    }
+                  ]
+                }
+              ];
+            }
           }
 
           const stream = await ai.models.generateContentStream({
             model: attempt.model,
-            contents: contents as any,
+            contents: effectiveContents as any,
             config: {
               systemInstruction,
               thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
@@ -461,12 +797,14 @@ async function generateChatWithRetry(
           break;
         } catch (err: any) {
           streamError = err;
+          if (attempt.allowSearch && isSearchToolQuotaOrUnsupported(err)) {
+            googleSearchCooldownUntil = Date.now() + 90_000;
+          }
           if (attempt.model === DEFAULT_MODEL && isModelOverloadedError(err)) {
             primaryOverloaded = true;
           }
-          const msg = String(err?.message || err);
           const isTransient = isTransientGeminiError(err);
-          const canFallbackSearch = attempt.allowSearch && (isTransient || msg.includes("400") || msg.includes("INVALID_ARGUMENT"));
+          const canFallbackSearch = attempt.allowSearch && isSearchToolQuotaOrUnsupported(err);
           if (streamedText.length > 0 || (!isTransient && !canFallbackSearch) || attemptIdx === modelsToTry.length - 1) {
             throw err;
           }
@@ -477,7 +815,7 @@ async function generateChatWithRetry(
         throw streamError;
       }
 
-      const sources = extractGroundingSources(groundingChunks);
+      const sources = groundingChunks.length > 0 ? extractGroundingSources(groundingChunks) : fallbackWebSources;
       sendEvent({
         type: "done",
         mode,
@@ -572,15 +910,17 @@ async function generateChatWithRetry(
         { role: "user", parts: [{ text: message }] }
       ];
 
-      const { response, usedModel } = await generateChatWithRetry(
+      const { response, usedModel, fallbackSources } = await generateChatWithRetry(
         ai,
         contents as any,
         systemInstruction,
-        Boolean(webAccess)
+        Boolean(webAccess),
+        message
       );
 
       const reply = response.text || "I have processed your request.";
-      const sources = extractGroundingSources(response.candidates?.[0]?.groundingMetadata?.groundingChunks);
+      const grounded = extractGroundingSources(response.candidates?.[0]?.groundingMetadata?.groundingChunks);
+      const sources = grounded.length > 0 ? grounded : fallbackSources;
 
       res.json({
         reply,
@@ -810,22 +1150,24 @@ Include:
 3. Comparative Analysis & Conflicting Information
 4. Recommended Next Steps for the user.`;
 
-        const { response } = await generateChatWithRetry(
+        const { response, fallbackSources } = await generateChatWithRetry(
           ai,
           [{ role: "user", parts: [{ text: prompt }] }],
           "You are DiptiK AI Deep Research Analyst. Use live Google Search results to provide accurate, up-to-date findings.",
-          true
+          true,
+          query
         );
 
         const groundedSources = extractGroundingSources(
           response.candidates?.[0]?.groundingMetadata?.groundingChunks
         );
+        const finalSources = groundedSources.length > 0 ? groundedSources : fallbackSources;
 
         return res.json({
           report: response.text || "Research synthesis completed.",
           query,
           depth,
-          sources: groundedSources,
+          sources: finalSources,
           timestamp: new Date().toISOString()
         });
       } catch (e: any) {
@@ -913,16 +1255,18 @@ Include 3 short sections with Markdown headings:
 3. Quick Phone Actions Suggested
 Keep total length concise (~160 words) so it reads cleanly on a phone notification feed.`;
 
-          const { response, usedModel } = await generateChatWithRetry(
+          const { response, usedModel, fallbackSources } = await generateChatWithRetry(
             ai,
             [{ role: "user", parts: [{ text: prompt }] }],
             "You are DiptiK AI 3 Cloud Brain generating a concise daily mobile briefing.",
-            true
+            true,
+            `weather and news in ${city}`
           );
 
+          const grounded = extractGroundingSources(response.candidates?.[0]?.groundingMetadata?.groundingChunks);
           return res.json({
             briefing: response.text || "Your daily briefing is ready.",
-            sources: extractGroundingSources(response.candidates?.[0]?.groundingMetadata?.groundingChunks),
+            sources: grounded.length > 0 ? grounded : fallbackSources,
             modelUsed: usedModel,
             generatedAt: new Date().toISOString()
           });
@@ -1231,25 +1575,20 @@ ${recentNotes || "- No recent notes saved."}
 Query: "${searchQuery}"
 Give a direct, factual 2-3 sentence live answer with exact current numbers, dates, or headlines for voice playback.`;
 
-    const attempts = [
-      { model: FAST_FALLBACK_MODEL, thinkingLevel: ThinkingLevel.MINIMAL },
-      { model: DEFAULT_MODEL, thinkingLevel: ThinkingLevel.LOW }
-    ];
-
-    let lastErr: any = null;
-    for (const attempt of attempts) {
+    // Tier 1: Gemini native Google Search Grounding (when not in quota cooldown)
+    if (Date.now() >= googleSearchCooldownUntil) {
       try {
         const response = await withTimeout(
           ai.models.generateContent({
-            model: attempt.model,
+            model: FAST_FALLBACK_MODEL,
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             config: {
               systemInstruction: "You are an ultra-fast live web lookup engine for a real-time voice assistant. Reply in 2-3 crisp spoken sentences using Google Search.",
-              thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
+              thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
               tools: [{ googleSearch: {} }]
             }
           }),
-          7500,
+          5500,
           "Live web search"
         );
         const sources = extractGroundingSources(
@@ -1267,10 +1606,57 @@ Give a direct, factual 2-3 sentence live answer with exact current numbers, date
         });
         return { answer, sources, cached: false };
       } catch (err: any) {
-        lastErr = err;
+        if (isSearchToolQuotaOrUnsupported(err)) {
+          googleSearchCooldownUntil = Date.now() + 90_000;
+        }
       }
     }
-    throw lastErr || new Error("Live web search failed.");
+
+    // Tier 2: Fast Parallel Real-Time Web Retrieval (Google News RSS, Wikipedia, DDG, Weather/FX/Crypto) + Fast Gemini Synthesis
+    const webData = await fetchRealtimeWebFallback(searchQuery, sessionContext.city);
+    const synthesisPrompt = webData.contextText
+      ? `Current UTC: ${new Date().toISOString()} | User Local Time: ${sessionContext.clientDateTime || new Date().toLocaleString()} | City: ${sessionContext.city || "Global"}.
+User Question: "${searchQuery}"
+
+Retrieved Live Web & Reference Data:
+${webData.contextText}
+
+Answer the user's question directly and factually in 2-3 crisp spoken sentences. Use the retrieved live data above when relevant, and your verified knowledge for historical/general facts. Never mention technical errors or tool failures.`
+      : `Current UTC: ${new Date().toISOString()} | User Local Time: ${sessionContext.clientDateTime || new Date().toLocaleString()} | City: ${sessionContext.city || "Global"}.
+User Question: "${searchQuery}"
+
+Answer clearly, accurately, and concisely in 2-3 crisp spoken sentences using verified factual knowledge.`;
+
+    try {
+      const synthResp = await withTimeout(
+        ai.models.generateContent({
+          model: FAST_FALLBACK_MODEL,
+          contents: [{ role: "user", parts: [{ text: synthesisPrompt }] }],
+          config: {
+            systemInstruction: "You are an ultra-fast factual briefing engine for a voice assistant. Give direct, confident, accurate 2-3 sentence spoken answers.",
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+          }
+        }),
+        6000,
+        "Fast web synthesis"
+      );
+      const answer = synthResp.text?.trim() || webData.contextText || "No details available.";
+      if (liveSearchCache.size >= 100) {
+        const oldestKey = liveSearchCache.keys().next().value;
+        if (oldestKey) liveSearchCache.delete(oldestKey);
+      }
+      liveSearchCache.set(cacheKey, {
+        answer,
+        sources: webData.sources,
+        expiresAt: Date.now() + 60_000
+      });
+      return { answer, sources: webData.sources, cached: false };
+    } catch {
+      if (webData.contextText) {
+        return { answer: webData.contextText.slice(0, 600), sources: webData.sources, cached: false };
+      }
+      throw new Error("Unable to retrieve answer right now.");
+    }
   }
 
   async function executeLiveToolCall(
@@ -1320,6 +1706,9 @@ Give a direct, factual 2-3 sentence live answer with exact current numbers, date
       if (!/^https?:\/\//i.test(targetUrl)) {
         targetUrl = `https://${targetUrl}`;
       }
+      if (!isSafePublicHttpUrl(targetUrl)) {
+        return { error: "Only public http/https URLs can be browsed." };
+      }
       const focus = String(args.focus || "Summarize key live updates and headlines in 2-3 sentences.");
       safeSend({
         type: "toolStatus",
@@ -1329,44 +1718,93 @@ Give a direct, factual 2-3 sentence live answer with exact current numbers, date
       const ai = getAIClient();
       if (!ai) return { error: "Cloud browsing unavailable without GEMINI_API_KEY." };
       try {
-        let resp;
-        try {
-          resp = await withTimeout(
-            ai.models.generateContent({
-              model: FAST_FALLBACK_MODEL,
-              contents: `Inspect ${targetUrl}. Focus: ${focus}. UTC: ${new Date().toISOString()}. Answer concisely in 2-3 sentences for voice.`,
-              config: {
-                thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
-                tools: [{ urlContext: {} }]
-              }
-            }),
-            7500,
-            "URL browse"
-          );
-        } catch {
-          const fallback = await runFastVoiceWebSearch(ai, `${targetUrl} ${focus}`, sessionContext);
-          const sources = [
-            { title: targetUrl, url: targetUrl, credibility: "Browsed Page" },
-            ...fallback.sources.filter(s => s.url !== targetUrl)
-          ].slice(0, 5);
-          safeSend({ type: "liveSources", sources, query: targetUrl });
-          return {
-            url: targetUrl,
-            pageSummary: fallback.answer,
-            fetchedAtUtc: new Date().toISOString()
-          };
+        // 1. Try Gemini urlContext if not in quota cooldown
+        if (Date.now() >= googleSearchCooldownUntil) {
+          try {
+            const resp = await withTimeout(
+              ai.models.generateContent({
+                model: FAST_FALLBACK_MODEL,
+                contents: `Inspect ${targetUrl}. Focus: ${focus}. UTC: ${new Date().toISOString()}. Answer concisely in 2-3 sentences for voice.`,
+                config: {
+                  thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+                  tools: [{ urlContext: {} }]
+                }
+              }),
+              5500,
+              "URL browse"
+            );
+            const gSources = extractGroundingSources(
+              resp.candidates?.[0]?.groundingMetadata?.groundingChunks
+            );
+            const sources = [
+              { title: targetUrl, url: targetUrl, credibility: "Browsed Page" },
+              ...gSources.filter(s => s.url !== targetUrl)
+            ].slice(0, 5);
+            safeSend({ type: "liveSources", sources, query: targetUrl });
+            return {
+              url: targetUrl,
+              pageSummary: resp.text || "Page inspected.",
+              fetchedAtUtc: new Date().toISOString()
+            };
+          } catch (err: any) {
+            if (isSearchToolQuotaOrUnsupported(err)) {
+              googleSearchCooldownUntil = Date.now() + 90_000;
+            }
+          }
         }
-        const gSources = extractGroundingSources(
-          resp.candidates?.[0]?.groundingMetadata?.groundingChunks
-        );
+
+        // 2. Direct HTTP page fetch + fast extraction + Gemini summarization
+        try {
+          const pageRes = await fetch(targetUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; DiptiKAI/1.0)" },
+            signal: AbortSignal.timeout(4500)
+          });
+          if (pageRes.ok) {
+            const html = await pageRes.text();
+            const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+            const pageTitle = titleMatch ? decodeXmlEntities(titleMatch[1]) : targetUrl;
+            const visibleText = html
+              .replace(/<script[\s\S]*?<\/script>/gi, " ")
+              .replace(/<style[\s\S]*?<\/style>/gi, " ")
+              .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+              .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim()
+              .slice(0, 5000);
+
+            if (visibleText.length >= 120) {
+              const synth = await withTimeout(
+                ai.models.generateContent({
+                  model: FAST_FALLBACK_MODEL,
+                  contents: `URL: ${targetUrl}\nPage Title: ${pageTitle}\nFocus: ${focus}\n\nExtracted Live Page Text:\n${visibleText}\n\nSummarize the key facts/headlines concisely in 2-3 spoken sentences.`,
+                  config: { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+                }),
+                5500,
+                "Page summary"
+              );
+              const sources = [{ title: pageTitle, url: targetUrl, credibility: "Browsed Page" }];
+              safeSend({ type: "liveSources", sources, query: targetUrl });
+              return {
+                url: targetUrl,
+                title: pageTitle,
+                pageSummary: synth.text || visibleText.slice(0, 400),
+                fetchedAtUtc: new Date().toISOString()
+              };
+            }
+          }
+        } catch {}
+
+        // 3. Fallback to fast web search for that URL / domain
+        const fallback = await runFastVoiceWebSearch(ai, `${targetUrl} ${focus}`, sessionContext);
         const sources = [
           { title: targetUrl, url: targetUrl, credibility: "Browsed Page" },
-          ...gSources.filter(s => s.url !== targetUrl)
+          ...fallback.sources.filter(s => s.url !== targetUrl)
         ].slice(0, 5);
         safeSend({ type: "liveSources", sources, query: targetUrl });
         return {
           url: targetUrl,
-          pageSummary: resp.text || "Page inspected.",
+          pageSummary: fallback.answer,
           fetchedAtUtc: new Date().toISOString()
         };
       } catch (err: any) {

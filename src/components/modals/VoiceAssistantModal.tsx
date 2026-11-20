@@ -143,6 +143,7 @@ export const VoiceAssistantModal: React.FC = () => {
   const turnAgentRef = useRef<string>("");
   const turnSourcesRef = useRef<VoiceSource[]>([]);
   const turnSavedRef = useRef<boolean>(false);
+  const toolPendingRef = useRef<boolean>(false);
   const sessionTurnsRef = useRef<VoiceTurn[]>([]);
   const fallbackAbortRef = useRef<AbortController | null>(null);
 
@@ -190,11 +191,12 @@ export const VoiceAssistantModal: React.FC = () => {
     return () => window.clearInterval(id);
   }, [connectionState]);
 
-  const flushCurrentTurnToHistory = (modelLabel = "Gemini 3.8 Live (Voice + Web)") => {
+  const flushCurrentTurnToHistory = (modelLabel = "Gemini 3.8 Live (Voice + Web)", force = false) => {
     if (turnSavedRef.current) return;
     const uText = turnUserRef.current.trim();
     const aText = turnAgentRef.current.trim();
     if (!uText && !aText) return;
+    if (!force && !aText) return;
 
     turnSavedRef.current = true;
     const sourcesSnapshot = [...turnSourcesRef.current];
@@ -227,6 +229,7 @@ export const VoiceAssistantModal: React.FC = () => {
     turnAgentRef.current = "";
     turnSourcesRef.current = [];
     turnSavedRef.current = false;
+    toolPendingRef.current = false;
   };
 
   const stopAllPlayback = () => {
@@ -245,7 +248,8 @@ export const VoiceAssistantModal: React.FC = () => {
   };
 
   const cleanupSession = () => {
-    flushCurrentTurnToHistory();
+    flushCurrentTurnToHistory("Gemini 3.8 Live (Voice + Web)", true);
+    toolPendingRef.current = false;
     sessionReadyRef.current = false;
     stopAllPlayback();
 
@@ -466,7 +470,9 @@ export const VoiceAssistantModal: React.FC = () => {
           setConnectionState("speaking");
           playPcmChunk(msg.audio);
         } else if (msg.type === "toolStatus") {
-          setToolStatus(msg.status || "");
+          const nextStatus = msg.status || "";
+          toolPendingRef.current = Boolean(nextStatus);
+          setToolStatus(nextStatus);
         } else if (msg.type === "liveSources" && Array.isArray(msg.sources)) {
           const incoming: VoiceSource[] = msg.sources;
           const merged = [...turnSourcesRef.current];
@@ -492,13 +498,16 @@ export const VoiceAssistantModal: React.FC = () => {
         } else if (msg.type === "interrupted") {
           stopAllPlayback();
           flushCurrentTurnToHistory();
+          toolPendingRef.current = false;
           setToolStatus("");
           setConnectionState("listening");
         } else if (msg.type === "turnComplete") {
-          setToolStatus("");
-          flushCurrentTurnToHistory();
-          if (activeSourcesRef.current.size === 0) {
-            setConnectionState("listening");
+          if (!toolPendingRef.current) {
+            setToolStatus("");
+            flushCurrentTurnToHistory();
+            if (activeSourcesRef.current.size === 0) {
+              setConnectionState("listening");
+            }
           }
         } else if (msg.type === "toolAction") {
           handleLiveToolAction(msg.name, msg.args || {});
