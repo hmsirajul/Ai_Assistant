@@ -348,6 +348,7 @@ export interface StudyCheckItem {
   completed: boolean;
   source?: "manual" | "google_classroom";
   externalId?: string;
+  courseId?: string;
   courseName?: string;
   description?: string;
   linkUrl?: string;

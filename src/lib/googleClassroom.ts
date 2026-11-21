@@ -1,11 +1,21 @@
+import { initializeApp, getApps } from "firebase/app";
 import {
-  auth,
+  getAuth,
   GoogleAuthProvider,
   signInWithPopup,
-  linkWithPopup,
-  reauthenticateWithPopup
-} from "./firebase";
+  signOut,
+  setPersistence,
+  inMemoryPersistence
+} from "firebase/auth";
+import firebaseConfig from "../../firebase-applet-config.json";
 import { ClassroomCourseSummary } from "../types";
+
+const CLASSROOM_APP_NAME = "classroom-oauth";
+const classroomApp =
+  getApps().find(app => app.name === CLASSROOM_APP_NAME) ||
+  initializeApp(firebaseConfig, CLASSROOM_APP_NAME);
+const classroomAuth = getAuth(classroomApp);
+void setPersistence(classroomAuth, inMemoryPersistence).catch(() => {});
 
 export const CLASSROOM_SCOPES = [
   "https://www.googleapis.com/auth/classroom.courses.readonly",
@@ -28,6 +38,7 @@ export function setClassroomAccessToken(token: string | null): void {
 
 export function clearClassroomAccessToken(): void {
   cachedClassroomAccessToken = null;
+  void signOut(classroomAuth).catch(() => {});
 }
 
 export interface ClassroomOAuthConnectionResult {
@@ -37,48 +48,26 @@ export interface ClassroomOAuthConnectionResult {
 }
 
 export async function connectGoogleClassroomOAuth(
-  forceSelectAccount = false
+  forceSelectAccount = false,
+  hintEmail?: string
 ): Promise<ClassroomOAuthConnectionResult> {
+  if (forceSelectAccount) {
+    cachedClassroomAccessToken = null;
+    await signOut(classroomAuth).catch(() => {});
+  }
+
   const provider = new GoogleAuthProvider();
   CLASSROOM_SCOPES.forEach(scope => provider.addScope(scope));
-  provider.setCustomParameters({
+  const customParams: Record<string, string> = {
     prompt: forceSelectAccount ? "select_account consent" : "consent",
     include_granted_scopes: "true"
-  });
-
-  const currentUser = auth.currentUser;
-  const hasGoogleLinked = Boolean(
-    currentUser?.providerData?.some(p => p.providerId === "google.com")
-  );
-
-  let result;
-  if (currentUser && !forceSelectAccount && !hasGoogleLinked) {
-    try {
-      result = await linkWithPopup(currentUser, provider);
-    } catch (err: any) {
-      if (
-        err?.code === "auth/credential-already-in-use" ||
-        err?.code === "auth/provider-already-linked" ||
-        err?.code === "auth/email-already-in-use"
-      ) {
-        result = await signInWithPopup(auth, provider);
-      } else {
-        throw err;
-      }
-    }
-  } else if (currentUser && !forceSelectAccount && hasGoogleLinked) {
-    try {
-      result = await reauthenticateWithPopup(currentUser, provider);
-    } catch (err: any) {
-      if (err?.code === "auth/user-mismatch") {
-        result = await signInWithPopup(auth, provider);
-      } else {
-        throw err;
-      }
-    }
-  } else {
-    result = await signInWithPopup(auth, provider);
+  };
+  if (!forceSelectAccount && hintEmail) {
+    customParams.login_hint = hintEmail;
   }
+  provider.setCustomParameters(customParams);
+
+  const result = await signInWithPopup(classroomAuth, provider);
 
   const credential = GoogleAuthProvider.credentialFromResult(result);
   const accessToken = credential?.accessToken;
@@ -350,7 +339,8 @@ export async function fetchGoogleClassroomSnapshot(
     })
   );
 
-  // Sort updates newest first
+  // Sort courses alphabetically and updates newest first
+  courses.sort((a, b) => a.name.localeCompare(b.name));
   updates.sort(
     (a, b) => new Date(b.updateTime).getTime() - new Date(a.updateTime).getTime()
   );

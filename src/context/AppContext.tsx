@@ -370,7 +370,11 @@ interface AppContextType {
   classroomSyncing: boolean;
   classroomSyncError: string | null;
   connectGoogleClassroom: (forceSelectAccount?: boolean) => Promise<void>;
-  syncGoogleClassroomNow: (options?: { silent?: boolean; isInitialConnect?: boolean }) => Promise<void>;
+  syncGoogleClassroomNow: (options?: {
+    silent?: boolean;
+    isInitialConnect?: boolean;
+    replaceClassroomItems?: boolean;
+  }) => Promise<void>;
   disconnectGoogleClassroom: (removeSyncedTasks?: boolean) => Promise<void>;
   updateClassroomPreferences: (
     updates: Partial<
@@ -623,11 +627,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch {}
     }
 
+    let initOp: OperationType = OperationType.GET;
     try {
+      await user.getIdToken();
+      if (activeUidRef.current !== uid) return;
+
       const snap = await getDoc(userRef);
       if (activeUidRef.current !== uid) return;
 
       if (!snap.exists()) {
+        initOp = OperationType.CREATE;
         const providerId = user.providerData?.[0]?.providerId;
         const derivedName = (user.displayName || user.email?.split("@")[0] || "DiptiK User").slice(0, 100);
         const derivedNickname = (derivedName.split(/\s+/)[0] || "User").slice(0, 50);
@@ -663,7 +672,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error("Error initializing user profile in Firestore:", err);
       if (err instanceof Error && err.message.includes("Missing or insufficient permissions")) {
-        handleFirestoreError(err, OperationType.WRITE, userDocPath);
+        handleFirestoreError(err, initOp, userDocPath);
       }
     }
 
@@ -1251,9 +1260,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const userRef = doc(db, "users", uid);
         const snap = await getDoc(userRef);
         const clean = sanitizeForBlueprint(merged, uid);
+        const { uid: _immutableUid, ...mutableFields } = clean;
         if (snap.exists()) {
           await updateDoc(userRef, {
-            ...clean,
+            ...mutableFields,
             updatedAt: serverTimestamp()
           });
         } else {
@@ -2194,7 +2204,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const syncGoogleClassroomNow = async (options?: { silent?: boolean; isInitialConnect?: boolean }) => {
+  const syncGoogleClassroomNow = async (options?: {
+    silent?: boolean;
+    isInitialConnect?: boolean;
+    replaceClassroomItems?: boolean;
+  }) => {
     const token = getClassroomAccessToken();
     if (!token) {
       setClassroomTokenReady(false);
@@ -2215,7 +2229,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const hadPreviousSync = Boolean(prevConn.lastSyncAt) && !options?.isInitialConnect;
 
       // 1. De-duplicated assignment upsert into academicChecklist (Study Table Task Manager)
-      const existingChecklist = [...(curr.academicChecklist || [])];
+      const baseChecklist = options?.replaceClassroomItems
+        ? (curr.academicChecklist || []).filter(item => item.source !== "google_classroom")
+        : [...(curr.academicChecklist || [])];
+      const existingChecklist = [...baseChecklist];
       const byExternalId = new Map<string, number>();
       existingChecklist.forEach((item, idx) => {
         if (item.externalId) {
@@ -2237,6 +2254,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             dueDate: a.dueDateLabel,
             source: "google_classroom",
             externalId: a.externalId,
+            courseId: a.courseId,
             courseName: a.courseName,
             description: a.description || undefined,
             linkUrl: a.linkUrl || undefined,
@@ -2255,6 +2273,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             completed: false,
             source: "google_classroom",
             externalId: a.externalId,
+            courseId: a.courseId,
             courseName: a.courseName,
             description: a.description || undefined,
             linkUrl: a.linkUrl || undefined,
@@ -2280,7 +2299,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ].slice(0, 100);
 
       // 2. Smart Notification History & Alerts (Assignments + Announcements + Materials)
-      const prevHistory = [...(curr.classroomNotificationHistory || [])];
+      const prevHistory = options?.replaceClassroomItems
+        ? []
+        : [...(curr.classroomNotificationHistory || [])];
       const existingHistoryExternalIds = new Set(prevHistory.map(h => h.externalId));
       const newHistoryRecords: ClassroomNotificationRecord[] = [];
       const formatLabel = (iso: string) => {
@@ -2429,26 +2450,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setClassroomSyncError(null);
     setClassroomSyncing(true);
     try {
-      const res = await connectGoogleClassroomOAuth(forceSelectAccount);
+      const currBefore = studyWorkspaceRef.current;
+      const hintEmail = !forceSelectAccount ? currBefore.classroomConnection?.accountEmail || undefined : undefined;
+      const res = await connectGoogleClassroomOAuth(forceSelectAccount, hintEmail);
       setClassroomTokenReady(true);
 
       const curr = studyWorkspaceRef.current;
-      const isInitialConnect = !curr.classroomConnection?.connected;
+      const prevEmail = (curr.classroomConnection?.accountEmail || "").trim().toLowerCase();
+      const nextEmail = (res.accountEmail || "").trim().toLowerCase();
+      const isSwitchedAccount = Boolean(prevEmail && nextEmail && prevEmail !== nextEmail);
+      const isInitialConnect = !curr.classroomConnection?.connected || isSwitchedAccount;
+
       const nextState: StudyWorkspaceState = {
         ...curr,
+        academicChecklist: isSwitchedAccount
+          ? (curr.academicChecklist || []).filter(item => item.source !== "google_classroom")
+          : curr.academicChecklist || [],
         classroomConnection: {
           ...(curr.classroomConnection || DEFAULT_STUDY_WORKSPACE_STATE.classroomConnection),
           connected: true,
           accountEmail: res.accountEmail,
-          accountName: res.accountName
-        }
+          accountName: res.accountName,
+          courses: isSwitchedAccount ? [] : curr.classroomConnection?.courses || []
+        },
+        classroomNotificationHistory: isSwitchedAccount ? [] : curr.classroomNotificationHistory || []
       };
       studyWorkspaceRef.current = nextState;
       setStudyWorkspace(nextState);
       await persistStudyWorkspaceToFirestore(nextState);
 
       setClassroomSyncing(false);
-      await syncGoogleClassroomNow({ silent: false, isInitialConnect });
+      await syncGoogleClassroomNow({
+        silent: false,
+        isInitialConnect,
+        replaceClassroomItems: isSwitchedAccount
+      });
     } catch (err: any) {
       setClassroomSyncing(false);
       const code = err?.code || "";

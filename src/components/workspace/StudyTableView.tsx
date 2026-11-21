@@ -93,6 +93,7 @@ export const StudyTableView: React.FC = () => {
   // Google Classroom Connections UI state
   const [taskSourceFilter, setTaskSourceFilter] = useState<"all" | "classroom" | "manual">("all");
   const [notifHistoryFilter, setNotifHistoryFilter] = useState<"all" | "assignment" | "announcement">("all");
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("all");
   const [confirmDisconnectOpen, setConfirmDisconnectOpen] = useState(false);
   const [removeTasksOnDisconnect, setRemoveTasksOnDisconnect] = useState(false);
   const [confirmClearHistory, setConfirmClearHistory] = useState(false);
@@ -344,13 +345,33 @@ export const StudyTableView: React.FC = () => {
   const classroomHistory = studyWorkspace.classroomNotificationHistory || [];
   const unreadClassroomCount = classroomHistory.filter(n => !n.read).length;
 
+  const activeSelectedCourse =
+    selectedCourseId !== "all"
+      ? classroomConn.courses.find(c => c.id === selectedCourseId) || null
+      : null;
+
+  useEffect(() => {
+    if (selectedCourseId !== "all" && !classroomConn.courses.some(c => c.id === selectedCourseId)) {
+      setSelectedCourseId("all");
+    }
+  }, [classroomConn.courses, selectedCourseId]);
+
+  const matchesSelectedCourseTask = (item: (typeof studyWorkspace.academicChecklist)[number]) => {
+    if (!activeSelectedCourse) return true;
+    if (item.source !== "google_classroom") return false;
+    if (item.courseId) return item.courseId === activeSelectedCourse.id;
+    return Boolean(item.courseName && item.courseName.includes(activeSelectedCourse.name));
+  };
+
   const filteredAcademicTasks = studyWorkspace.academicChecklist.filter(item => {
-    if (taskSourceFilter === "classroom") return item.source === "google_classroom";
-    if (taskSourceFilter === "manual") return item.source !== "google_classroom";
+    if (taskSourceFilter === "classroom" && item.source !== "google_classroom") return false;
+    if (taskSourceFilter === "manual" && item.source === "google_classroom") return false;
+    if (activeSelectedCourse && !matchesSelectedCourseTask(item)) return false;
     return true;
   });
 
   const filteredClassroomHistory = classroomHistory.filter(entry => {
+    if (activeSelectedCourse && entry.courseId !== activeSelectedCourse.id) return false;
     if (notifHistoryFilter === "assignment") return entry.type === "assignment";
     if (notifHistoryFilter === "announcement") return entry.type === "announcement" || entry.type === "material";
     return true;
@@ -588,10 +609,19 @@ export const StudyTableView: React.FC = () => {
                   {/* Left: Connected Courses & Notification Preferences */}
                   <div className="lg:col-span-5 space-y-4">
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-[#94a3b8]">
                           Synced Courses ({classroomConn.courses.length})
                         </h3>
+                        {selectedCourseId !== "all" && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCourseId("all")}
+                            className="text-[11px] font-medium text-[#0072FF] dark:text-[#00E5FF] hover:underline cursor-pointer"
+                          >
+                            All Classrooms
+                          </button>
+                        )}
                       </div>
                       {classroomConn.courses.length === 0 ? (
                         <p className="text-xs text-slate-400 dark:text-[#64748b] py-3">
@@ -599,33 +629,50 @@ export const StudyTableView: React.FC = () => {
                         </p>
                       ) : (
                         <div className="space-y-2 max-h-52 overflow-y-auto gemini-scroll pr-1">
-                          {classroomConn.courses.map(course => (
-                            <div
-                              key={course.id}
-                              className="p-3 rounded-xl bg-slate-50 dark:bg-[#181c2b] border border-slate-200/80 dark:border-white/[0.06] flex items-center justify-between gap-2"
-                            >
-                              <div className="min-w-0">
-                                <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                                  {course.name}
-                                  {course.section ? ` · ${course.section}` : ""}
-                                </p>
-                                <p className="text-[11px] text-slate-500 dark:text-[#94a3b8] truncate">
-                                  {course.teacherName || "Google Classroom"}
-                                </p>
+                          {classroomConn.courses.map(course => {
+                            const isSelected = selectedCourseId === course.id;
+                            return (
+                              <div
+                                key={course.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedCourseId(prev => (prev === course.id ? "all" : course.id))}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    setSelectedCourseId(prev => (prev === course.id ? "all" : course.id));
+                                  }
+                                }}
+                                className={`p-3 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? "bg-blue-50/70 dark:bg-[#0072FF]/15 border-[#0072FF]/50"
+                                    : "bg-slate-50 dark:bg-[#181c2b] border-slate-200/80 dark:border-white/[0.06] hover:border-[#0072FF]/35"
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                                    {course.name}
+                                    {course.section ? ` · ${course.section}` : ""}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500 dark:text-[#94a3b8] truncate">
+                                    {course.teacherName || "Google Classroom"}
+                                  </p>
+                                </div>
+                                {course.alternateLink && (
+                                  <a
+                                    href={course.alternateLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    aria-label={`Open ${course.name} in Google Classroom`}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-[#0072FF] dark:hover:text-[#00E5FF] shrink-0"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                  </a>
+                                )}
                               </div>
-                              {course.alternateLink && (
-                                <a
-                                  href={course.alternateLink}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  aria-label={`Open ${course.name} in Google Classroom`}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-[#0072FF] dark:hover:text-[#00E5FF] shrink-0"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </a>
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -1178,27 +1225,55 @@ export const StudyTableView: React.FC = () => {
                     </h2>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {(
-                      [
-                        { id: "all", label: "All" },
-                        { id: "classroom", label: "Classroom" },
-                        { id: "manual", label: "Manual" }
-                      ] as const
-                    ).map(tab => (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setTaskSourceFilter(tab.id)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer whitespace-nowrap transition-colors ${
-                          taskSourceFilter === tab.id
-                            ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
-                            : "bg-slate-100 dark:bg-[#181c2b] text-slate-600 dark:text-[#94a3b8]"
-                        }`}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {classroomConn.connected && classroomConn.courses.length > 0 && (
+                      <select
+                        value={selectedCourseId}
+                        onChange={e => {
+                          const nextId = e.target.value;
+                          setSelectedCourseId(nextId);
+                          if (nextId !== "all" && taskSourceFilter === "manual") {
+                            setTaskSourceFilter("all");
+                          }
+                        }}
+                        aria-label="Filter by Classroom course"
+                        className="bg-slate-100 dark:bg-[#181c2b] border border-slate-200 dark:border-white/[0.08] rounded-lg px-2 py-1 text-[11px] text-slate-700 dark:text-[#cbd5e1] max-w-[170px] truncate cursor-pointer focus:outline-none focus:border-[#0072FF]"
                       >
-                        {tab.label}
-                      </button>
-                    ))}
+                        <option value="all">All Classrooms</option>
+                        {classroomConn.courses.map(course => (
+                          <option key={course.id} value={course.id}>
+                            {course.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <div className="flex items-center gap-1">
+                      {(
+                        [
+                          { id: "all", label: "All" },
+                          { id: "classroom", label: "Classroom" },
+                          { id: "manual", label: "Manual" }
+                        ] as const
+                      ).map(tab => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => {
+                            setTaskSourceFilter(tab.id);
+                            if (tab.id === "manual") {
+                              setSelectedCourseId("all");
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer whitespace-nowrap transition-colors ${
+                            taskSourceFilter === tab.id
+                              ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+                              : "bg-slate-100 dark:bg-[#181c2b] text-slate-600 dark:text-[#94a3b8]"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
