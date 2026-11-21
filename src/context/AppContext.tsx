@@ -2487,11 +2487,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     } catch (err: any) {
       setClassroomSyncing(false);
-      const code = err?.code || "";
-      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
-        setClassroomSyncError("Google sign-in popup was closed before completing authorization.");
+      setClassroomTokenReady(Boolean(getClassroomAccessToken()));
+      const code = String(err?.code || "").toLowerCase();
+      const rawMessage = String(err?.message || "");
+      const lowerMsg = rawMessage.toLowerCase();
+      if (lowerMsg.includes("access_denied") || lowerMsg.includes("verification process") || code.includes("access-denied")) {
+        const msg =
+          "Google blocked this account (Error 403: access_denied) because the app's Google Auth consent screen is still in Testing mode or blocked by a school Workspace admin.";
+        setClassroomSyncError(msg);
+        addNotification({
+          title: "Google Classroom Access Blocked (403)",
+          message: msg,
+          category: "security"
+        });
+      } else if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        setClassroomSyncError(
+          "Google sign-in popup was closed before completing authorization. If Google showed 'Error 403: access_denied', publish the OAuth Audience or add that email as a Test user in Google Cloud Console."
+        );
       } else {
-        const msg = err?.message || "Could not authorize Google Classroom.";
+        const msg = rawMessage || "Could not authorize Google Classroom.";
         setClassroomSyncError(msg);
         addNotification({
           title: "Classroom Authorization Failed",

@@ -51,8 +51,8 @@ export async function connectGoogleClassroomOAuth(
   forceSelectAccount = false,
   hintEmail?: string
 ): Promise<ClassroomOAuthConnectionResult> {
+  const previousToken = cachedClassroomAccessToken;
   if (forceSelectAccount) {
-    cachedClassroomAccessToken = null;
     await signOut(classroomAuth).catch(() => {});
   }
 
@@ -67,31 +67,36 @@ export async function connectGoogleClassroomOAuth(
   }
   provider.setCustomParameters(customParams);
 
-  const result = await signInWithPopup(classroomAuth, provider);
+  try {
+    const result = await signInWithPopup(classroomAuth, provider);
 
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  const accessToken = credential?.accessToken;
-  if (!accessToken) {
-    throw new Error("Could not obtain a Google Classroom access token. Please allow Classroom permissions and try again.");
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const accessToken = credential?.accessToken;
+    if (!accessToken) {
+      throw new Error("Could not obtain a Google Classroom access token. Please allow Classroom permissions and try again.");
+    }
+
+    cachedClassroomAccessToken = accessToken;
+
+    const accountEmail =
+      result.user.email ||
+      result.user.providerData?.find(p => p.providerId === "google.com")?.email ||
+      "";
+    const accountName =
+      result.user.displayName ||
+      result.user.providerData?.find(p => p.providerId === "google.com")?.displayName ||
+      accountEmail ||
+      "Google Account";
+
+    return {
+      accessToken,
+      accountEmail,
+      accountName
+    };
+  } catch (err) {
+    cachedClassroomAccessToken = previousToken;
+    throw err;
   }
-
-  cachedClassroomAccessToken = accessToken;
-
-  const accountEmail =
-    result.user.email ||
-    result.user.providerData?.find(p => p.providerId === "google.com")?.email ||
-    "";
-  const accountName =
-    result.user.displayName ||
-    result.user.providerData?.find(p => p.providerId === "google.com")?.displayName ||
-    accountEmail ||
-    "Google Account";
-
-  return {
-    accessToken,
-    accountEmail,
-    accountName
-  };
 }
 
 export interface ParsedClassroomAssignment {

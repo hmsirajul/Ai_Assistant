@@ -552,9 +552,24 @@ export const StudyTableView: React.FC = () => {
               </div>
 
               {classroomSyncError && (
-                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span className="flex-1">{classroomSyncError}</span>
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 space-y-2 text-xs text-amber-900 dark:text-amber-200">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                    <span className="flex-1 leading-relaxed">{classroomSyncError}</span>
+                  </div>
+                  {(classroomSyncError.includes("403") || classroomSyncError.includes("Google Cloud Console")) && (
+                    <div className="pl-6 flex flex-wrap items-center gap-3 text-[11px] text-amber-800 dark:text-amber-300">
+                      <a
+                        href="https://console.cloud.google.com/auth/audience?project=dulcet-falcon-dzbz0"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-semibold underline hover:text-[#0072FF] dark:hover:text-[#00E5FF]"
+                      >
+                        <span>Open Google Auth Audience (dulcet-falcon-dzbz0)</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
 
