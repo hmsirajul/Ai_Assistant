@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { WorkspaceView } from "../../types";
 import { DiptiKLogo } from "../common/DiptiKLogo";
+import { navigateToPath } from "../../lib/navigation";
 
 interface GeminiSidebarProps {
   isOpen: boolean;
@@ -424,40 +425,71 @@ export const GeminiSidebar: React.FC<GeminiSidebarProps> = ({
         )}
       </div>
 
-      {/* 5. Footer Profile */}
-      <div className="px-3 py-3 border-t border-slate-200 dark:border-white/[0.08] shrink-0 flex items-center justify-between gap-2 bg-white dark:bg-[#121520] transition-colors duration-150">
-        <button
-          type="button"
-          onClick={() => setShowAuth(true)}
-          title="Manage profile or sign in"
-          className="flex items-center gap-2.5 min-w-0 flex-1 text-left rounded-xl p-1.5 hover:bg-slate-100 dark:hover:bg-white/[0.05] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF]"
-        >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#FF1E8A] via-[#8A2BE2] to-[#0072FF] border border-slate-200 dark:border-white/[0.2] text-white text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
-            {avatarSrc ? (
-              <img
-                src={avatarSrc}
-                alt={displayName}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span>{getInitials(displayName)}</span>
-            )}
-          </div>
-          <span className="text-[12px] font-medium tracking-wide text-slate-700 dark:text-[#e2e8f0] truncate">
-            {displayName}
-          </span>
-        </button>
+      {/* 5. Footer Profile & Legal Links */}
+      <div className="px-3 pt-2.5 pb-2.5 border-t border-slate-200 dark:border-white/[0.08] shrink-0 bg-white dark:bg-[#121520] transition-colors duration-150 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAuth(true)}
+            title="Manage profile or sign in"
+            className="flex items-center gap-2.5 min-w-0 flex-1 text-left rounded-xl p-1.5 hover:bg-slate-100 dark:hover:bg-white/[0.05] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF]"
+          >
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#FF1E8A] via-[#8A2BE2] to-[#0072FF] border border-slate-200 dark:border-white/[0.2] text-white text-xs font-semibold flex items-center justify-center shrink-0 overflow-hidden">
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt={displayName}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span>{getInitials(displayName)}</span>
+              )}
+            </div>
+            <span className="text-[12px] font-medium tracking-wide text-slate-700 dark:text-[#e2e8f0] truncate">
+              {displayName}
+            </span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setIsSettingsModalOpen(true)}
-          title="Settings"
-          aria-label="Open settings"
-          className="p-2 rounded-lg text-slate-500 dark:text-[#94a3b8] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF]"
-        >
-          <Settings className="w-4 h-4" strokeWidth={1.75} />
-        </button>
+          <button
+            type="button"
+            onClick={() => setIsSettingsModalOpen(true)}
+            title="Settings"
+            aria-label="Open settings"
+            className="p-2 rounded-lg text-slate-500 dark:text-[#94a3b8] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0072FF]"
+          >
+            <Settings className="w-4 h-4" strokeWidth={1.75} />
+          </button>
+        </div>
+
+        <footer className="px-1.5 flex items-center justify-between text-[11px] text-slate-400 dark:text-[#64748b]">
+          <span>DiptiK AI</span>
+          <div className="flex items-center gap-2.5">
+            <a
+              href="/privacy"
+              onClick={e => {
+                e.preventDefault();
+                onCloseMobile();
+                navigateToPath("/privacy");
+              }}
+              className="hover:text-[#0072FF] dark:hover:text-[#00E5FF] transition-colors"
+            >
+              Privacy
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              href="/terms"
+              onClick={e => {
+                e.preventDefault();
+                onCloseMobile();
+                navigateToPath("/terms");
+              }}
+              className="hover:text-[#0072FF] dark:hover:text-[#00E5FF] transition-colors"
+            >
+              Terms
+            </a>
+          </div>
+        </footer>
       </div>
     </aside>
   );

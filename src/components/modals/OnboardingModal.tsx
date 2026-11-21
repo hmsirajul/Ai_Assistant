@@ -16,6 +16,7 @@ import {
 import { DiptiKLogo } from "../common/DiptiKLogo";
 import { VoicePersonaName } from "../../types";
 import { VOICE_PERSONA_DETAILS, VoiceAccent, loadVoiceAccent, saveVoiceAccent } from "../../lib/voice";
+import { navigateToPath } from "../../lib/navigation";
 
 export const OnboardingModal: React.FC = () => {
   const {
@@ -243,10 +244,11 @@ export const OnboardingModal: React.FC = () => {
     <div
       className={`${
         isForcedAuthGate
-          ? "min-h-screen w-full bg-slate-50 dark:bg-[#0b0d14] flex items-center justify-center p-4"
+          ? "min-h-screen w-full bg-slate-50 dark:bg-[#0b0d14] flex flex-col items-center justify-between p-4 sm:p-6"
           : "fixed inset-0 z-50 bg-slate-950/55 dark:bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
       }`}
     >
+      {isForcedAuthGate && <div className="hidden sm:block" aria-hidden="true" />}
       <div className="w-full max-w-md bg-white dark:bg-[#121520] rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-white/[0.1] flex flex-col max-h-[92vh] relative text-slate-900 dark:text-[#e2e8f0]">
         {!isForcedAuthGate && (
           <button
@@ -642,12 +644,69 @@ export const OnboardingModal: React.FC = () => {
               </form>
             )}
 
-            <p className="text-[11px] text-slate-400 dark:text-[#64748b] text-center leading-relaxed pt-1 border-t border-slate-200 dark:border-white/[0.06]">
-              Each user’s chats, notebooks, notes, and memories are strictly private and isolated by account UID.
-            </p>
+            <div className="pt-2 border-t border-slate-200 dark:border-white/[0.06] space-y-2 text-center">
+              <p className="text-[11px] text-slate-400 dark:text-[#64748b] leading-relaxed">
+                Each user’s chats, notebooks, notes, and memories are strictly private and isolated by account UID.
+              </p>
+              {!isForcedAuthGate && (
+                <div className="flex items-center justify-center gap-3 text-[11px] text-slate-500 dark:text-[#94a3b8]">
+                  <a
+                    href="/privacy"
+                    onClick={e => {
+                      e.preventDefault();
+                      closeModal();
+                      navigateToPath("/privacy");
+                    }}
+                    className="hover:text-[#0072FF] dark:hover:text-[#00E5FF] transition-colors"
+                  >
+                    Privacy Policy
+                  </a>
+                  <span aria-hidden="true">·</span>
+                  <a
+                    href="/terms"
+                    onClick={e => {
+                      e.preventDefault();
+                      closeModal();
+                      navigateToPath("/terms");
+                    }}
+                    className="hover:text-[#0072FF] dark:hover:text-[#00E5FF] transition-colors"
+                  >
+                    Terms of Service
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      {isForcedAuthGate && (
+        <footer className="w-full max-w-md pt-6 pb-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-slate-500 dark:text-[#94a3b8]">
+          <span>© {new Date().getFullYear()} DiptiK AI Assistant</span>
+          <span aria-hidden="true">·</span>
+          <a
+            href="/privacy"
+            onClick={e => {
+              e.preventDefault();
+              navigateToPath("/privacy");
+            }}
+            className="hover:text-[#0072FF] dark:hover:text-[#00E5FF] font-medium transition-colors"
+          >
+            Privacy Policy
+          </a>
+          <span aria-hidden="true">·</span>
+          <a
+            href="/terms"
+            onClick={e => {
+              e.preventDefault();
+              navigateToPath("/terms");
+            }}
+            className="hover:text-[#0072FF] dark:hover:text-[#00E5FF] font-medium transition-colors"
+          >
+            Terms of Service
+          </a>
+        </footer>
+      )}
     </div>
   );
 };

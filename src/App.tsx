@@ -25,7 +25,9 @@ import { Bell, ExternalLink, RefreshCw, X } from "lucide-react";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { OfflineIndicator } from "./components/common/OfflineIndicator";
 import { DiptiKLogo } from "./components/common/DiptiKLogo";
+import { PublicLegalPage } from "./components/legal/PublicLegalPage";
 import { applyAppearanceToDocument, loadAppearanceConfig } from "./lib/appearance";
+import { getCurrentAppPath, PublicRoute, subscribeToNavigation } from "./lib/navigation";
 
 const WorkspaceContent: React.FC = () => {
   const { notifications } = useApp();
@@ -132,6 +134,22 @@ const WorkspaceContent: React.FC = () => {
 
 const MainContent: React.FC = () => {
   const { authReady, firebaseUser, isAuthenticated, userProfile } = useApp();
+  const [currentPath, setCurrentPath] = useState<PublicRoute>(() => getCurrentAppPath());
+
+  useEffect(() => {
+    return subscribeToNavigation(setCurrentPath);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (currentPath === "/privacy") {
+      document.title = "Privacy Policy — DiptiK AI 3";
+    } else if (currentPath === "/terms") {
+      document.title = "Terms of Service — DiptiK AI 3";
+    } else {
+      document.title = "DiptiK AI 3 — Intelligent Productivity Assistant";
+    }
+  }, [currentPath]);
 
   useEffect(() => {
     const mode =
@@ -147,6 +165,14 @@ const MainContent: React.FC = () => {
       return () => mql.removeEventListener("change", syncTheme);
     }
   }, [userProfile.theme]);
+
+  // Public routes: accessible immediately without login or waiting for Firebase Auth
+  if (currentPath === "/privacy") {
+    return <PublicLegalPage page="privacy" />;
+  }
+  if (currentPath === "/terms") {
+    return <PublicLegalPage page="terms" />;
+  }
 
   if (!authReady) {
     return (
